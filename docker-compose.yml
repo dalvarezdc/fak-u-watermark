@@ -1,0 +1,29 @@
+services:
+  api:
+    build: .
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      - FAKU_API_KEY=${FAKU_API_KEY:-}
+      - FAKU_BASE_URL=${FAKU_BASE_URL:-https://api.openai.com/v1}
+      - FAKU_MODEL=${FAKU_MODEL:-gpt-4o-mini}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    volumes:
+      - faku-data:/root/.faku
+
+  ui:
+    build: .
+    command: python -m ui.app
+    ports:
+      - "7860:7860"
+    environment:
+      - FAKU_API_KEY=${FAKU_API_KEY:-}
+      - FAKU_BASE_URL=${FAKU_BASE_URL:-https://api.openai.com/v1}
+      - FAKU_MODEL=${FAKU_MODEL:-gpt-4o-mini}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    volumes:
+      - faku-data:/root/.faku
+
+volumes:
+  faku-data:

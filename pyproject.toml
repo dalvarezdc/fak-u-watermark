@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fak-u-watermark"
+version = "0.1.0"
+description = "Detect, highlight, and neutralize AI text & image watermarks"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "fak-u-watermark contributors" }]
+keywords = ["watermark", "ai", "detection", "kgw", "exif"]
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "gradio>=4.0",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "transformers>=4.38",
+    "torch>=2.0",
+    "numpy>=1.24",
+    "pillow>=10.0",
+    "piexif>=1.1",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+    "opencv-python-headless>=4.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.3",
+]
+
+[project.scripts]
+faku = "cli.main:main"
+faku-ui = "ui.app:main"
+faku-api = "api.main:run"
+
+[tool.setuptools]
+packages = [
+    "watermark_core",
+    "watermark_core.schemes",
+    "watermark_core.tests",
+    "image_tools",
+    "image_tools.tests",
+    "api",
+    "api.routes",
+    "ui",
+    "cli",
+]
+
+[tool.setuptools.package-dir]
+"watermark_core" = "packages/watermark_core"
+"image_tools" = "packages/image_tools"
+"api" = "api"
+"ui" = "ui"
+"cli" = "cli"
+
+[tool.pytest.ini_options]
+testpaths = ["packages/watermark_core/tests", "packages/image_tools/tests"]
+pythonpath = ["packages", "."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
