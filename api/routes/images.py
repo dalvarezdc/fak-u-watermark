@@ -222,6 +222,45 @@ async def inpaint_upload(
     )
 
 
+@router.post("/c2pa")
+async def c2pa_detect(file: UploadFile = File(...)) -> dict[str, Any]:
+    from image_tools.c2pa_tools import detect_c2pa
+
+    raw = await file.read()
+    report = detect_c2pa(raw)
+    return {"filename": file.filename, **report.to_dict()}
+
+
+@router.post("/c2pa/strip")
+async def c2pa_strip(file: UploadFile = File(...)) -> Response:
+    from image_tools.c2pa_tools import strip_c2pa
+
+    raw = await file.read()
+    cleaned, report = strip_c2pa(raw)
+    store = get_history_store()
+    store.add(
+        kind="image",
+        title=f"C2PA strip: {file.filename or 'upload'}",
+        payload={"type": "c2pa_strip", "report": report.to_dict()},
+    )
+    return Response(
+        content=cleaned,
+        media_type="image/png",
+        headers={
+            "Content-Disposition": 'attachment; filename="c2pa_stripped.png"',
+            "X-C2PA-Present-After": str(report.present).lower(),
+        },
+    )
+
+
+@router.post("/c2pa/b64")
+def c2pa_detect_b64(body: dict[str, str]) -> dict[str, Any]:
+    from image_tools.c2pa_tools import detect_c2pa
+
+    raw = _decode_b64(body["image_b64"])
+    return detect_c2pa(raw).to_dict()
+
+
 @router.get("/history")
 def image_history(limit: int = 50) -> dict[str, Any]:
     store = get_history_store()

@@ -44,19 +44,42 @@ class NeutralizeConfig:
 
     @classmethod
     def from_env(cls, style: ParaphraseStyle = "subtle") -> "NeutralizeConfig":
-        return cls(
-            api_key=os.environ.get("FAKU_API_KEY")
-            or os.environ.get("OPENAI_API_KEY")
-            or os.environ.get("DEEPSEEK_API_KEY")
-            or os.environ.get("XAI_API_KEY"),
-            base_url=os.environ.get("FAKU_BASE_URL")
-            or os.environ.get("OPENAI_BASE_URL")
-            or "https://api.openai.com/v1",
-            model=os.environ.get("FAKU_MODEL")
-            or os.environ.get("OPENAI_MODEL")
-            or "gpt-4o-mini",
-            style=style,
-        )
+        """Load from ~/.faku/settings.json first, then environment variables."""
+        try:
+            from .settings import load_settings
+
+            s = load_settings()
+            return cls(
+                api_key=s.api_key
+                or os.environ.get("FAKU_API_KEY")
+                or os.environ.get("OPENAI_API_KEY")
+                or os.environ.get("DEEPSEEK_API_KEY")
+                or os.environ.get("XAI_API_KEY"),
+                base_url=s.base_url
+                or os.environ.get("FAKU_BASE_URL")
+                or os.environ.get("OPENAI_BASE_URL")
+                or "https://api.openai.com/v1",
+                model=s.model
+                or os.environ.get("FAKU_MODEL")
+                or os.environ.get("OPENAI_MODEL")
+                or "gpt-4o-mini",
+                style=style,
+                temperature=float(s.temperature or 0.7),
+            )
+        except Exception:  # noqa: BLE001
+            return cls(
+                api_key=os.environ.get("FAKU_API_KEY")
+                or os.environ.get("OPENAI_API_KEY")
+                or os.environ.get("DEEPSEEK_API_KEY")
+                or os.environ.get("XAI_API_KEY"),
+                base_url=os.environ.get("FAKU_BASE_URL")
+                or os.environ.get("OPENAI_BASE_URL")
+                or "https://api.openai.com/v1",
+                model=os.environ.get("FAKU_MODEL")
+                or os.environ.get("OPENAI_MODEL")
+                or "gpt-4o-mini",
+                style=style,
+            )
 
 
 @dataclass
