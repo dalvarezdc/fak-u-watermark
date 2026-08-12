@@ -103,23 +103,32 @@ def density_to_html(
 
     parts: list[str] = []
     css = """
-.density-map { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  white-space: pre-wrap; word-break: break-word; line-height: 1.7; font-size: 0.95rem;
-  padding: 0.75rem; border: 1px solid #e5e7eb; border-radius: 8px; background: #fafafa; }
-.density-token { border-radius: 2px; padding: 0 1px; }
-.density-legend { font-size: 0.8rem; color: #6b7280; margin-top: 0.5rem; }
+.density-map {
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-size: 1.05rem; line-height: 1.75; color: #1c1917;
+  white-space: pre-wrap; word-break: break-word;
+  padding: 1.25rem 1.5rem; border: 1px solid #e7e5e4; border-radius: 12px;
+  background: #fffefb; max-height: min(22rem, 50vh); overflow: auto;
+  box-shadow: 0 1px 2px rgba(28, 25, 23, 0.04);
+}
+.density-token { border-radius: 3px; padding: 0.05em 0.1em; }
+.density-legend {
+  font-family: system-ui, sans-serif; font-size: 0.85rem; color: #78716c;
+  margin-top: 0.65rem; line-height: 1.45;
+}
 """.strip()
 
     for p in points:
         # Normalize 0..1 within document
         norm = (p.window_green_fraction - fmin) / span
-        # Map to alpha 0.05 .. 0.95 on soft yellow #FEF08A ≈ rgb(254,240,138)
-        alpha = 0.08 + 0.87 * norm
-        # Stronger when z high
+        # Gentler alpha so long prose stays readable
+        alpha = 0.06 + 0.55 * norm
         if p.window_z >= 4:
-            alpha = min(0.98, alpha + 0.1)
+            alpha = min(0.85, alpha + 0.12)
         bg = f"rgba(254, 240, 138, {alpha:.3f})"
-        border = "1px solid rgba(202, 138, 4, 0.35)" if p.is_signal else "none"
+        underline = (
+            "box-shadow: inset 0 -2px 0 rgba(202, 138, 4, 0.55);" if p.is_signal else ""
+        )
         title = (
             f"density={p.window_green_fraction:.0%} z≈{p.window_z:.2f}"
             + (" · green-list token" if p.is_signal else "")
@@ -129,14 +138,16 @@ def density_to_html(
         if show_values:
             label += f"<sup style='font-size:0.6em;opacity:0.7'>{p.window_green_fraction:.0%}</sup>"
         parts.append(
-            f'<span class="density-token" style="background:{bg};border-bottom:{border}" '
+            f'<span class="density-token" style="background:{bg};{underline}" '
             f'title="{html.escape(title)}">{label}</span>'
         )
 
     body = "".join(parts)
     legend = (
-        f'<div class="density-legend">Heatmap: lighter = lower local green density · '
-        f"darker yellow = higher · range {fmin:.0%}–{fmax:.0%} · hover for details</div>"
+        f'<div class="density-legend">'
+        f"<strong>How to read:</strong> warmer yellow = higher local green density "
+        f"({fmin:.0%}–{fmax:.0%}). Underlined tokens are on the green list. Hover for details."
+        f"</div>"
     )
     if wrap:
         body = f'<div class="density-map">{body}</div>{legend}'

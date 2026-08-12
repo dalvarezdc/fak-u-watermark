@@ -54,72 +54,196 @@ TMP.mkdir(parents=True, exist_ok=True)
 _MAX_HISTORY_IMAGE_BYTES = 1_500_000
 
 CUSTOM_CSS = f"""
+/* ── App chrome ─────────────────────────────────────────── */
+.gradio-container {{
+  max-width: 1100px !important;
+  margin: 0 auto !important;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif !important;
+}}
+.faku-hero {{
+  background: linear-gradient(135deg, #fffbeb 0%, #fafaf9 55%, #f5f5f4 100%);
+  border: 1px solid #e7e5e4;
+  border-radius: 16px;
+  padding: 1.25rem 1.5rem 1rem;
+  margin-bottom: 0.75rem;
+}}
+.faku-hero h1 {{
+  margin: 0 0 0.35rem 0 !important;
+  font-size: 1.65rem !important;
+  font-weight: 750 !important;
+  letter-spacing: -0.02em;
+  color: #1c1917 !important;
+}}
+.faku-hero p {{
+  margin: 0.25rem 0 0 !important;
+  color: #57534e !important;
+  font-size: 0.98rem !important;
+  line-height: 1.5 !important;
+}}
+.faku-steps {{
+  display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.85rem;
+}}
+.faku-step {{
+  background: #fff; border: 1px solid #e7e5e4; color: #44403c;
+  border-radius: 999px; padding: 0.28rem 0.75rem; font-size: 0.82rem; font-weight: 600;
+}}
+.faku-step em {{ font-style: normal; color: #b45309; }}
+
+/* ── Reading panes (long-form friendly) ─────────────────── */
 .watermark-signal {{
   background-color: {SOFT_YELLOW} !important;
-  border-radius: 2px;
-  padding: 0 1px;
+  border-radius: 3px !important;
+  padding: 0.05em 0.12em !important;
 }}
-.watermark-output {{
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  white-space: pre-wrap; word-break: break-word; line-height: 1.65;
-  font-size: 0.95rem; padding: 0.75rem; border: 1px solid #e5e7eb;
-  border-radius: 8px; background: #fafafa;
+.watermark-output, .density-map {{
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif !important;
+  font-size: 1.05rem !important;
+  line-height: 1.75 !important;
+  color: #1c1917 !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  padding: 1.25rem 1.5rem !important;
+  border: 1px solid #e7e5e4 !important;
+  border-radius: 12px !important;
+  background: #fffefb !important;
+  max-height: min(28rem, 60vh) !important;
+  overflow: auto !important;
 }}
-.verdict-detected {{
-  background: #fecaca; color: #7f1d1d; padding: 0.35rem 0.75rem;
-  border-radius: 999px; font-weight: 600; display: inline-block;
+.faku-section-label {{
+  font-size: 0.78rem !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.06em !important;
+  color: #78716c !important;
+  margin: 1rem 0 0.4rem !important;
 }}
-.verdict-uncertain {{
-  background: #fde68a; color: #78350f; padding: 0.35rem 0.75rem;
-  border-radius: 999px; font-weight: 600; display: inline-block;
+
+/* ── Verdict + stats cards ──────────────────────────────── */
+.verdict-banner {{
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1.25rem;
+  padding: 0.9rem 1.15rem; border-radius: 12px; margin: 0.25rem 0 0.75rem;
+  border: 1px solid transparent;
 }}
-.verdict-none {{
-  background: #e5e7eb; color: #374151; padding: 0.35rem 0.75rem;
-  border-radius: 999px; font-weight: 600; display: inline-block;
+.verdict-banner.detected {{ background: #fef2f2; border-color: #fecaca; }}
+.verdict-banner.uncertain {{ background: #fffbeb; border-color: #fde68a; }}
+.verdict-banner.none {{ background: #f5f5f4; border-color: #e7e5e4; }}
+.verdict-pill {{
+  font-weight: 750; font-size: 0.95rem; padding: 0.35rem 0.85rem;
+  border-radius: 999px; display: inline-block;
 }}
+.verdict-detected .verdict-pill, .verdict-banner.detected .verdict-pill {{
+  background: #fecaca; color: #7f1d1d;
+}}
+.verdict-uncertain .verdict-pill, .verdict-banner.uncertain .verdict-pill {{
+  background: #fde68a; color: #78350f;
+}}
+.verdict-none .verdict-pill, .verdict-banner.none .verdict-pill {{
+  background: #e7e5e4; color: #44403c;
+}}
+.verdict-meta {{ color: #57534e; font-size: 0.9rem; line-height: 1.4; }}
+.stats-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  gap: 0.65rem;
+  margin: 0.5rem 0 1rem;
+}}
+.stat-card {{
+  background: #fafaf9; border: 1px solid #e7e5e4; border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+}}
+.stat-card .label {{
+  font-size: 0.72rem; font-weight: 650; text-transform: uppercase;
+  letter-spacing: 0.04em; color: #78716c; margin-bottom: 0.2rem;
+}}
+.stat-card .value {{
+  font-size: 1.2rem; font-weight: 750; color: #1c1917; letter-spacing: -0.02em;
+}}
+.stat-card .hint {{ font-size: 0.75rem; color: #a8a29e; margin-top: 0.15rem; }}
+
+/* ── Compare ────────────────────────────────────────────── */
 .faku-compare {{
-  display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem;
 }}
 @media (max-width: 800px) {{ .faku-compare {{ grid-template-columns: 1fr; }} }}
+.faku-compare-col {{
+  background: #fffefb; border: 1px solid #e7e5e4; border-radius: 12px;
+  overflow: hidden;
+}}
+.faku-compare-col header {{
+  font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; color: #78716c;
+  padding: 0.55rem 0.9rem; background: #fafaf9; border-bottom: 1px solid #e7e5e4;
+}}
+.faku-compare-col pre {{
+  font-family: Georgia, "Times New Roman", serif; font-size: 0.95rem; line-height: 1.65;
+  white-space: pre-wrap; word-break: break-word; color: #1c1917;
+  margin: 0; padding: 0.9rem 1rem; max-height: 16rem; overflow: auto;
+}}
+
+/* ── Status toast ───────────────────────────────────────── */
+.faku-status {{
+  background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534;
+  border-radius: 10px; padding: 0.65rem 0.9rem; font-size: 0.92rem;
+}}
+
+/* ── Soften Gradio density ──────────────────────────────── */
+footer {{ display: none !important; }}
 """
 
 
 def _verdict_html(stats: dict) -> str:
     v = stats.get("verdict", "none")
     label = stats.get("verdict_label", v)
-    cls = {
-        "detected": "verdict-detected",
-        "uncertain": "verdict-uncertain",
-        "none": "verdict-none",
-    }.get(v, "verdict-none")
-    return f'<span class="{cls}">{html.escape(label)}</span>'
-
-
-def _stats_markdown(stats: dict) -> str:
+    z = stats.get("z_score", 0)
+    gf = stats.get("green_fraction", 0)
+    n = stats.get("total_tokens", 0)
+    tip = {
+        "detected": "Statistical green-list signal is strong for this config.",
+        "uncertain": "Some signal, but below the detection threshold — treat carefully.",
+        "none": "No strong watermark signal with the current key / scheme.",
+    }.get(v, "")
     return f"""
-| Metric | Value |
-|--------|------:|
-| **Verdict** | {stats.get("verdict_label", "—")} |
-| Green fraction | {stats.get("green_fraction", 0):.2%} |
-| Green / total | {stats.get("green_count", 0)} / {stats.get("total_tokens", 0)} |
-| Z-score | {stats.get("z_score", 0):.3f} |
-| P-value (approx) | {stats.get("p_value", 1):.2e} |
-| Gamma | {stats.get("gamma", "—")} |
-| Scheme | {stats.get("scheme", "—")} |
-| Threshold | {stats.get("threshold", 4.0)} |
+<div class="verdict-banner {html.escape(v)}">
+  <span class="verdict-pill">{html.escape(label)}</span>
+  <span class="verdict-meta">
+    <strong>z = {z:.2f}</strong> · green {gf:.1%} · {n} tokens scored<br/>
+    <span style="color:#78716c">{html.escape(tip)}</span>
+  </span>
+</div>
 """
 
 
+def _stats_markdown(stats: dict) -> str:
+    """HTML metric cards (kept name for call sites)."""
+    items = [
+        ("Z-score", f"{stats.get('z_score', 0):.2f}", "vs threshold"),
+        ("Green %", f"{stats.get('green_fraction', 0):.1%}", "of scored tokens"),
+        ("Green / total", f"{stats.get('green_count', 0)}/{stats.get('total_tokens', 0)}", "tokens"),
+        ("P-value", f"{stats.get('p_value', 1):.1e}", "approx one-sided"),
+        ("Gamma", f"{stats.get('gamma', '—')}", "green-list size"),
+        ("Scheme", f"{stats.get('scheme', '—')}", f"thr {stats.get('threshold', 4.0)}"),
+    ]
+    cards = "".join(
+        f'<div class="stat-card"><div class="label">{html.escape(lab)}</div>'
+        f'<div class="value">{html.escape(str(val))}</div>'
+        f'<div class="hint">{html.escape(hint)}</div></div>'
+        for lab, val, hint in items
+    )
+    return f'<div class="stats-grid">{cards}</div>'
+
+
 def _compare_html(original: str, cleaned: str) -> str:
-    o = html.escape(original or "")
-    c = html.escape(cleaned or "")
+    o = html.escape(original or "—")
+    c = html.escape(cleaned or "—")
     return f"""
 <div class="faku-compare">
-  <div><strong>Original</strong>
-    <pre style="white-space:pre-wrap;background:#fafafa;padding:0.75rem;border-radius:8px;border:1px solid #e5e7eb;max-height:20rem;overflow:auto">{o}</pre>
+  <div class="faku-compare-col">
+    <header>Original</header>
+    <pre>{o}</pre>
   </div>
-  <div><strong>Cleaned</strong>
-    <pre style="white-space:pre-wrap;background:#fafafa;padding:0.75rem;border-radius:8px;border:1px solid #e5e7eb;max-height:20rem;overflow:auto">{c}</pre>
+  <div class="faku-compare-col">
+    <header>Cleaned</header>
+    <pre>{c}</pre>
   </div>
 </div>
 """
@@ -744,26 +868,30 @@ def build_app() -> gr.Blocks:
     provider_choices = list(PROVIDER_PRESETS.keys())
 
     with gr.Blocks(title="fak-u-watermark") as demo:
-        gr.Markdown(
+        gr.HTML(
             """
-# fak-u-watermark
-**Strip the mark. Keep the meaning.**
-
-Detect → highlight (yellow + density heatmap) → neutralize (paraphrase / targeted / adaptive).
-Configure **API keys** in the Settings tab (saved under `~/.faku/settings.json`).
+<div class="faku-hero">
+  <h1>fak-u-watermark</h1>
+  <p><strong>Strip the mark. Keep the meaning.</strong>
+  Paste text or upload an image — detect statistical watermarks, see yellow highlights, then neutralize.</p>
+  <div class="faku-steps">
+    <span class="faku-step"><em>1</em> Paste / upload</span>
+    <span class="faku-step"><em>2</em> Analyze</span>
+    <span class="faku-step"><em>3</em> Review highlights</span>
+    <span class="faku-step"><em>4</em> Neutralize · copy · export</span>
+  </div>
+</div>
             """
         )
 
         with gr.Tabs():
             # ── SETTINGS ──────────────────────────────────────────────────
-            with gr.Tab("Settings"):
+            with gr.Tab("⚙️ Settings"):
                 gr.Markdown(
                     f"""
-### API keys (manual)
-Keys are stored **locally only** in `{settings_path()}` (file mode 600).  
-Never committed to git. You can also use env vars (`FAKU_API_KEY`, `OPENAI_API_KEY`, …).
-
-Supported: any **OpenAI-compatible** endpoint (OpenAI, DeepSeek, xAI Grok, proxies).
+### API keys
+Stored **only on this machine** in `{settings_path()}` (permissions 600).  
+Also works with env vars: `FAKU_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`.
                     """
                 )
                 with gr.Row():
@@ -863,23 +991,37 @@ CLI: `faku settings set --api-key sk-... --provider openai`
                 )
 
             # ── TEXT ──────────────────────────────────────────────────────
-            with gr.Tab("Text"):
+            with gr.Tab("📝 Text"):
                 analysis_state = gr.State(None)
 
+                gr.Markdown(
+                    "### 1 · Your text\n"
+                    "Paste a chapter, article, or model output. Long documents scroll in the panels below."
+                )
+                text_in = gr.Textbox(
+                    label="Input",
+                    placeholder="Paste text here… (long chapters are fine)",
+                    lines=14,
+                    max_lines=30,
+                    elem_id="input-text",
+                )
                 with gr.Row():
-                    with gr.Column(scale=3):
-                        text_in = gr.Textbox(
-                            label="Input text",
-                            placeholder="Paste text to analyze…",
-                            lines=12,
-                            elem_id="input-text",
-                        )
-                        file_in = gr.File(
-                            label="Or upload .txt / .md",
-                            file_types=[".txt", ".md", ".text"],
-                            type="filepath",
-                        )
-                    with gr.Column(scale=2):
+                    file_in = gr.File(
+                        label="Or upload .txt / .md",
+                        file_types=[".txt", ".md", ".text"],
+                        type="filepath",
+                        scale=2,
+                    )
+                    show_hl = gr.Checkbox(
+                        value=True, label="Yellow highlights on", scale=1
+                    )
+
+                with gr.Accordion("Watermark settings (optional)", open=False):
+                    gr.Markdown(
+                        "Defaults match classic Kirchenbauer (γ=0.25). "
+                        "Change only if you know the scheme / secret key."
+                    )
+                    with gr.Row():
                         preset = gr.Dropdown(
                             choices=preset_choices,
                             value="kirchenbauer_default",
@@ -888,59 +1030,75 @@ CLI: `faku settings set --api-key sk-... --provider openai`
                         scheme = gr.Dropdown(
                             choices=["kgw", "unigram"], value="kgw", label="Scheme"
                         )
-                        gamma = gr.Slider(0.05, 0.95, value=0.25, step=0.05, label="Gamma")
-                        key = gr.Textbox(label="Secret key / seed", value="15485863")
                         tokenizer = gr.Dropdown(
                             choices=tokenizer_choices, value="gpt2", label="Tokenizer"
                         )
+                    with gr.Row():
+                        gamma = gr.Slider(0.05, 0.95, value=0.25, step=0.05, label="Gamma")
                         threshold = gr.Slider(
-                            1.0, 10.0, value=4.0, step=0.5, label="Z-score threshold"
+                            1.0, 10.0, value=4.0, step=0.5, label="Z threshold"
                         )
                         density_window = gr.Slider(
-                            5, 80, value=20, step=1, label="Density window size"
+                            5, 80, value=20, step=1, label="Heatmap window"
                         )
-                        show_hl = gr.Checkbox(value=True, label="Show yellow highlights")
+                    key = gr.Textbox(label="Secret key / seed", value="15485863")
 
                 with gr.Row():
-                    btn_analyze = gr.Button("Analyze", variant="primary")
-                    btn_neu = gr.Button("Neutralize (paraphrase)")
-                    btn_targeted = gr.Button("Targeted green→red (offline)")
-                    btn_adaptive = gr.Button("Adaptive neutralize")
-                    btn_reanalyze = gr.Button("Re-analyze cleaned")
+                    btn_analyze = gr.Button("Analyze", variant="primary", size="lg")
+                    btn_neu = gr.Button("Neutralize (paraphrase)", size="lg")
+                    btn_targeted = gr.Button("Targeted (offline)")
+                    btn_adaptive = gr.Button("Adaptive")
+                    btn_reanalyze = gr.Button("Re-check cleaned")
 
-                with gr.Accordion("LLM options (uses Settings keys if fields empty)", open=False):
+                with gr.Accordion("Paraphrase / API options", open=False):
                     style = gr.Radio(
                         choices=["subtle", "strong"],
                         value="subtle",
-                        label="Paraphrase style",
+                        label="Paraphrase style (default: subtle wording only)",
                     )
-                    api_key = gr.Textbox(
-                        label="API key override",
-                        type="password",
-                        placeholder="Leave empty to use Settings / env",
-                    )
-                    base_url = gr.Textbox(label="Base URL override")
-                    model = gr.Textbox(label="Model override")
-                    max_rounds = gr.Slider(1, 6, value=3, step=1, label="Adaptive max rounds")
-                    target_z = gr.Slider(
-                        1.0, 8.0, value=4.0, step=0.5, label="Adaptive target z-score"
-                    )
+                    with gr.Row():
+                        api_key = gr.Textbox(
+                            label="API key override",
+                            type="password",
+                            placeholder="Empty = use Settings tab",
+                        )
+                        base_url = gr.Textbox(label="Base URL override")
+                        model = gr.Textbox(label="Model override")
+                    with gr.Row():
+                        max_rounds = gr.Slider(
+                            1, 6, value=3, step=1, label="Adaptive max rounds"
+                        )
+                        target_z = gr.Slider(
+                            1.0, 8.0, value=4.0, step=0.5, label="Adaptive target z"
+                        )
 
-                gr.Markdown("### Original (highlighted) + statistics")
-                verdict_out = gr.HTML(value="—")
-                highlighted_out = gr.HTML()
-                stats_out = gr.Markdown()
+                gr.Markdown("### 2 · Results")
+                verdict_out = gr.HTML(
+                    value='<p style="color:#78716c">Click <strong>Analyze</strong> to see the verdict.</p>'
+                )
+                stats_out = gr.HTML()
+                gr.HTML('<div class="faku-section-label">Highlighted text</div>')
+                gr.Markdown(
+                    "*Yellow marks = tokens on the reconstructed green list (hover for tip). "
+                    "Scroll inside the panel for long chapters.*"
+                )
+                highlighted_out = gr.HTML(
+                    value='<p class="watermark-empty" style="color:#78716c;font-style:italic">'
+                    "Highlights appear here after Analyze.</p>"
+                )
 
-                gr.Markdown("### Density heatmap")
-                heat_out = gr.HTML()
-                heat_meta = gr.Markdown()
+                with gr.Accordion("Density heatmap (where the signal clusters)", open=False):
+                    heat_meta = gr.Markdown()
+                    heat_out = gr.HTML()
 
-                gr.Markdown("### Cleaned (editable)")
+                gr.Markdown("### 3 · Cleaned output")
                 cleaned_out = gr.Textbox(
-                    label="Cleaned text — edit freely",
+                    label="Editable cleaned text",
                     lines=12,
+                    max_lines=28,
                     interactive=True,
                     elem_id="cleaned-text",
+                    placeholder="After neutralize, edit freely here…",
                 )
                 status_out = gr.Markdown()
 
@@ -948,13 +1106,15 @@ CLI: `faku settings set --api-key sk-... --provider openai`
                     btn_copy = gr.Button("Copy cleaned", variant="primary")
                     btn_export_txt = gr.Button("Export .txt")
                     btn_export_html = gr.Button("Export .html")
+                with gr.Row():
                     export_txt = gr.File(label="Download .txt")
                     export_html_f = gr.File(label="Download .html")
 
-                gr.Markdown("### Before / After")
-                compare_out = gr.HTML(value="—")
+                with gr.Accordion("Before / after comparison", open=False):
+                    compare_out = gr.HTML(value="—")
 
-                with gr.Accordion("Batch analyze", open=False):
+                with gr.Accordion("Batch · history", open=False):
+                    gr.Markdown("#### Batch analyze")
                     batch_files = gr.File(
                         label="Multiple .txt / .md files",
                         file_count="multiple",
@@ -962,8 +1122,7 @@ CLI: `faku settings set --api-key sk-... --provider openai`
                     )
                     btn_batch = gr.Button("Run batch")
                     batch_out = gr.Markdown()
-
-                with gr.Accordion("History", open=False):
+                    gr.Markdown("#### History")
                     hist_dd = gr.Dropdown(label="Past text jobs", choices=[])
                     with gr.Row():
                         btn_refresh_hist = gr.Button("Refresh")
@@ -1075,30 +1234,36 @@ CLI: `faku settings set --api-key sk-... --provider openai`
                 demo.load(refresh_text_history_dropdown, outputs=[hist_dd])
 
             # ── IMAGES ────────────────────────────────────────────────────
-            with gr.Tab("Images"):
+            with gr.Tab("🖼️ Images"):
+                gr.Markdown(
+                    "### Image tools\n"
+                    "Inspect / strip metadata, check C2PA markers, or paint over a visible watermark."
+                )
                 with gr.Row():
                     with gr.Column():
                         img_in = gr.Image(
-                            label="Upload image", type="pil", sources=["upload", "clipboard"]
+                            label="Upload", type="pil", sources=["upload", "clipboard"]
                         )
-                        btn_exif = gr.Button("Read EXIF / metadata", variant="primary")
-                        btn_strip = gr.Button("Strip all metadata")
-                        btn_c2pa = gr.Button("Detect C2PA / Content Credentials")
-                        btn_c2pa_strip = gr.Button("Strip C2PA (re-encode)")
+                        with gr.Row():
+                            btn_exif = gr.Button("Read EXIF", variant="primary")
+                            btn_strip = gr.Button("Strip metadata")
+                        with gr.Row():
+                            btn_c2pa = gr.Button("Detect C2PA")
+                            btn_c2pa_strip = gr.Button("Strip C2PA")
                         with gr.Accordion("Edit metadata fields", open=False):
                             artist = gr.Textbox(label="Artist")
                             copyright_ = gr.Textbox(label="Copyright")
                             description = gr.Textbox(label="ImageDescription")
                             btn_update = gr.Button("Apply field updates")
                     with gr.Column():
-                        img_out = gr.Image(label="Result / preview", type="pil")
+                        img_out = gr.Image(label="Result", type="pil")
                         img_download = gr.File(label="Download cleaned image")
                         img_status = gr.Markdown()
-                        exif_out = gr.Code(label="Metadata / C2PA report", language="json", lines=14)
+                        exif_out = gr.Code(label="Metadata / C2PA report", language="json", lines=12)
 
-                gr.Markdown("### Visual watermark removal — paint the region")
+                gr.Markdown("### Remove a visible mark\nPaint white over the logo or watermark, then remove.")
                 mask_editor = gr.ImageMask(
-                    label="Paint watermark region (brush)",
+                    label="Brush mask",
                     type="pil",
                     layers=False,
                     brush=gr.Brush(colors=["#FFFFFF"], default_size=24, color_mode="fixed"),
@@ -1180,32 +1345,28 @@ CLI: `faku settings set --api-key sk-... --provider openai`
                 demo.load(refresh_image_history_dropdown, outputs=[img_hist_dd])
 
             # ── ABOUT ─────────────────────────────────────────────────────
-            with gr.Tab("About"):
+            with gr.Tab("ℹ️ About"):
                 gr.Markdown(
                     """
 ## How it works
 
-### Text
-1. Tokenize (default GPT-2) → reconstruct green list from key → z-score.
-2. Soft yellow highlights + **density heatmap** (sliding window).
-3. Neutralize:
-   - **Paraphrase** (API, subtle/strong)
-   - **Targeted green→red** (offline, needs correct key)
-   - **Adaptive** (API loop until z drops)
-4. Copy / export / re-analyze / history restore / batch files.
+1. **Tokenize** (default GPT-2) and reconstruct the green list from previous tokens + key.  
+2. **Score** green fraction → z-score and a clear verdict.  
+3. **Show** soft yellow highlights (and optional density heatmap).  
+4. **Remove** via paraphrase (API), targeted synonyms (offline), or adaptive loops.  
+5. **Copy / export** and re-check the cleaned text.
 
-### Images
-- EXIF view/edit/strip · **C2PA marker detect/strip** · brush inpaint (local or API).
+**Images:** EXIF · C2PA markers · brush inpaint (local OpenCV or API).
 
-### Config
-Settings tab or `~/.faku/settings.json` or env `FAKU_API_KEY` / `FAKU_BASE_URL` / `FAKU_MODEL`.
+**Keys:** Settings tab, `~/.faku/settings.json`, or env vars. Open the UI at **http://127.0.0.1:7860** (not `0.0.0.0`).
 
-See **README.md** for deploy and full usage.
+Full docs: `README.md`.
                     """
                 )
 
-        gr.Markdown(
-            "<center><small>fak-u-watermark · ~/.faku/ for history + settings</small></center>"
+        gr.HTML(
+            "<p style='text-align:center;color:#a8a29e;font-size:0.8rem;margin-top:1.25rem'>"
+            "fak-u-watermark · local history &amp; keys in ~/.faku/</p>"
         )
 
     return demo
@@ -1221,11 +1382,30 @@ def main():
     port = int(os.environ.get("FAKU_UI_PORT", "7860"))
     print(f"\n  fak-u-watermark UI →  http://127.0.0.1:{port}\n", flush=True)
     # Gradio 6: theme/css on launch
+    theme = gr.themes.Soft(
+        primary_hue="amber",
+        secondary_hue="stone",
+        neutral_hue="stone",
+        font=gr.themes.GoogleFont("DM Sans"),
+        font_mono=gr.themes.GoogleFont("IBM Plex Mono"),
+        radius_size="lg",
+        spacing_size="md",
+        text_size="md",
+    ).set(
+        body_background_fill="#fafaf9",
+        block_background_fill="#ffffff",
+        block_border_color="#e7e5e4",
+        block_label_text_color="#57534e",
+        block_title_text_color="#1c1917",
+        button_primary_background_fill="#d97706",
+        button_primary_background_fill_hover="#b45309",
+        button_primary_text_color="#ffffff",
+    )
     demo.launch(
         server_name=host,
         server_port=port,
         css=CUSTOM_CSS,
-        theme=gr.themes.Soft(primary_hue="amber", secondary_hue="stone"),
+        theme=theme,
         inbrowser=os.environ.get("FAKU_UI_INBROWSER", "1") not in ("0", "false", "False"),
     )
 

@@ -10,17 +10,37 @@ from .schemes.base import TokenInfo
 # Soft yellow — matches design plan
 HIGHLIGHT_BG = "#FEF08A"
 HIGHLIGHT_CSS = f"""
-.watermark-signal {{
-  background-color: {HIGHLIGHT_BG};
-  border-radius: 2px;
-  padding: 0 1px;
-}}
 .watermark-output {{
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+  font-size: 1.05rem;
+  line-height: 1.75;
+  letter-spacing: 0.01em;
+  color: #1c1917;
   white-space: pre-wrap;
   word-break: break-word;
-  line-height: 1.6;
-  font-size: 0.95rem;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid #e7e5e4;
+  border-radius: 12px;
+  background: #fffefb;
+  max-height: min(28rem, 60vh);
+  overflow: auto;
+  box-shadow: 0 1px 2px rgba(28, 25, 23, 0.04);
+}}
+.watermark-signal {{
+  background-color: {HIGHLIGHT_BG};
+  border-radius: 3px;
+  padding: 0.05em 0.12em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}}
+.watermark-signal:hover {{
+  background-color: #fde047;
+  outline: 1px solid #ca8a04;
+}}
+.watermark-empty {{
+  color: #78716c;
+  font-style: italic;
+  padding: 1rem;
 }}
 """.strip()
 
@@ -47,22 +67,28 @@ def tokens_to_html(
     include_style: bool = True,
 ) -> str:
     """
-    Render tokens as HTML with soft yellow marks on signal tokens.
+    Render tokens as readable HTML with soft yellow marks on signal tokens.
 
-    Uses <mark class="watermark-signal"> for contributing tokens.
+    Uses prose-friendly serif for long-form reading comfort.
     """
+    if not tokens:
+        body = '<p class="watermark-empty">Paste text and click Analyze to see highlights here.</p>'
+        if include_style:
+            return f"<style>{HIGHLIGHT_CSS}</style>\n{body}"
+        return body
+
     parts: list[str] = []
     for t in tokens:
         escaped = html.escape(t.text)
         if show_highlights and t.is_signal:
-            title = ' title="Contributes to watermark signal"'
+            title = ' title="Contributes to watermark signal (green-list token)"'
             parts.append(f'<mark class="watermark-signal"{title}>{escaped}</mark>')
         else:
             parts.append(escaped)
 
     body = "".join(parts)
     if wrap:
-        body = f'<div class="watermark-output">{body}</div>'
+        body = f'<div class="watermark-output" role="article">{body}</div>'
     if include_style:
         return f"<style>{HIGHLIGHT_CSS}</style>\n{body}"
     return body
@@ -95,10 +121,11 @@ def tokens_to_annotated_document(
   <meta charset="utf-8" />
   <title>{html.escape(title)}</title>
   <style>
-    body {{ font-family: system-ui, sans-serif; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }}
+    body {{ font-family: system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1.25rem; color: #1c1917; }}
     {HIGHLIGHT_CSS}
+    .watermark-output {{ max-height: none; }}
     table {{ border-collapse: collapse; margin-bottom: 1.5rem; }}
-    td {{ border: 1px solid #ccc; }}
+    td {{ border: 1px solid #d6d3d1; padding: 0.4rem 0.6rem; }}
   </style>
 </head>
 <body>
