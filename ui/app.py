@@ -1212,13 +1212,21 @@ See **README.md** for deploy and full usage.
 
 
 def main():
+    import os
+
     demo = build_app()
+    # Bind all interfaces for LAN/Docker; open via 127.0.0.1 in the browser
+    # (http://0.0.0.0:7860 shows about:blank in Safari and some other browsers).
+    host = os.environ.get("FAKU_UI_HOST", "0.0.0.0")
+    port = int(os.environ.get("FAKU_UI_PORT", "7860"))
+    print(f"\n  fak-u-watermark UI →  http://127.0.0.1:{port}\n", flush=True)
     # Gradio 6: theme/css on launch
     demo.launch(
-        server_name="0.0.0.0",
-        server_port=7860,
+        server_name=host,
+        server_port=port,
         css=CUSTOM_CSS,
         theme=gr.themes.Soft(primary_hue="amber", secondary_hue="stone"),
+        inbrowser=os.environ.get("FAKU_UI_INBROWSER", "1") not in ("0", "false", "False"),
     )
 
 

@@ -16,9 +16,20 @@ Detect, highlight, and neutralize AI watermarks in **text** and **images**.
 
 ## Requirements
 
-- Python **3.11+**
+- **[uv](https://docs.astral.sh/uv/)** (Python package manager)
+- Python **3.11+** (uv can install it for you)
 - macOS / Linux / Windows
 - Optional: API key for paraphrase / adaptive neutralize / API inpaint
+
+Install uv if needed:
+
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# or Homebrew
+brew install uv
+```
 
 ---
 
@@ -28,11 +39,27 @@ Detect, highlight, and neutralize AI watermarks in **text** and **images**.
 git clone https://github.com/<you>/fak-u-watermark.git
 cd fak-u-watermark
 
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+# Create env + install project + deps from pyproject.toml / uv.lock
+uv sync
 
-pip install -r requirements.txt
-pip install -e .
+# Dev tools (pytest, ruff)
+uv sync --extra dev
+```
+
+`uv` manages its own `.venv` under the project — you do **not** need `python -m venv` or `pip`.
+
+Run commands with `uv run` (no manual activate required):
+
+```bash
+uv run python -m ui.app
+uv run faku settings show
+uv run pytest -q
+```
+
+Optional: activate the env if you prefer a classic shell:
+
+```bash
+source .venv/bin/activate   # created by uv sync
 ```
 
 First text analysis downloads the **GPT-2** tokenizer from Hugging Face.
@@ -49,7 +76,7 @@ You can set keys in **three** ways. Priority when calling the LLM:
 
 ### Option A — UI Settings tab (recommended)
 
-1. Start the UI: `python -m ui.app`
+1. Start the UI: `uv run python -m ui.app`
 2. Open **http://127.0.0.1:7860**
 3. Go to the **Settings** tab
 4. Choose a provider preset (OpenAI / DeepSeek / xAI / Custom)
@@ -82,25 +109,25 @@ Example file:
 
 ```bash
 # Show (key masked)
-python -m cli.main settings show
+uv run faku settings show
 
 # Save key + provider preset
-python -m cli.main settings set \
+uv run faku settings set \
   --api-key "sk-..." \
   --provider openai
 
 # Custom endpoint (any OpenAI-compatible server)
-python -m cli.main settings set \
+uv run faku settings set \
   --api-key "sk-..." \
   --base-url "https://api.deepseek.com" \
   --model "deepseek-chat" \
   --provider custom
 
 # Clear key
-python -m cli.main settings set --clear-key
+uv run faku settings set --clear-key
 
 # Reveal full key (careful)
-python -m cli.main settings show --reveal
+uv run faku settings show --reveal
 ```
 
 ### Option C — Environment variables
@@ -133,10 +160,12 @@ export FAKU_INPAINT_BASE_URL="https://api.openai.com/v1"
 ### Gradio UI (easiest)
 
 ```bash
-source .venv/bin/activate
-python -m ui.app
+uv run python -m ui.app
+# Open this URL in the browser (not 0.0.0.0):
 # → http://127.0.0.1:7860
 ```
+
+> **Note:** The server listens on `0.0.0.0` (all interfaces). Use **`http://127.0.0.1:7860`** or **`http://localhost:7860`**. Opening `http://0.0.0.0:7860` often shows a blank page (`about:blank`) in Safari and some other browsers.
 
 **Tabs**
 
@@ -150,7 +179,7 @@ python -m ui.app
 ### FastAPI
 
 ```bash
-uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 # Docs: http://127.0.0.1:8000/docs
 # Health: http://127.0.0.1:8000/health
 ```
@@ -174,33 +203,30 @@ Useful endpoints:
 
 ```bash
 # Analyze
-python -m cli.main text analyze "Your text here" --preset kirchenbauer_default
-python -m cli.main text analyze -f sample.txt --html out.html
+uv run faku text analyze "Your text here" --preset kirchenbauer_default
+uv run faku text analyze -f sample.txt --html out.html
 
 # Batch
-python -m cli.main text batch ./notes/*.txt
+uv run faku text batch ./notes/*.txt
 
 # Neutralize (uses saved settings / env)
-python -m cli.main text neutralize -f sample.txt -o cleaned.txt --style subtle
+uv run faku text neutralize -f sample.txt -o cleaned.txt --style subtle
 
 # Offline targeted (needs correct watermark key)
-python -m cli.main text targeted -f sample.txt --key 15485863 -o cleaned.txt
+uv run faku text targeted -f sample.txt --key 15485863 -o cleaned.txt
 
 # Adaptive paraphrase
-python -m cli.main text adaptive -f sample.txt --max-rounds 3 --target-z 4
+uv run faku text adaptive -f sample.txt --max-rounds 3 --target-z 4
 
 # Images
-python -m cli.main image exif photo.jpg
-python -m cli.main image strip photo.jpg -o clean.png
-python -m cli.main image c2pa photo.jpg
-python -m cli.main image c2pa photo.jpg --strip -o noc2pa.png
-```
+uv run faku image exif photo.jpg
+uv run faku image strip photo.jpg -o clean.png
+uv run faku image c2pa photo.jpg
+uv run faku image c2pa photo.jpg --strip -o noc2pa.png
 
-After `pip install -e .` you can also use the `faku` entrypoint:
-
-```bash
-faku text analyze "hello" --preset kirchenbauer_default
-faku settings set --api-key sk-... --provider openai
+# Settings
+uv run faku settings set --api-key sk-... --provider openai
+uv run faku settings show
 ```
 
 ---
@@ -210,10 +236,10 @@ faku settings set --api-key sk-... --provider openai
 ### Local (laptop)
 
 ```bash
-source .venv/bin/activate
-python -m ui.app          # UI :7860
+uv sync
+uv run python -m ui.app                              # UI :7860
 # and/or
-uvicorn api.main:app --host 0.0.0.0 --port 8000
+uv run uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
 Data lives on the machine:
@@ -250,12 +276,12 @@ docker run --rm -p 7860:7860 \
   -e FAKU_BASE_URL=https://api.openai.com/v1 \
   -e FAKU_MODEL=gpt-4o-mini \
   -v faku-data:/root/.faku \
-  faku python -m ui.app
+  faku uv run python -m ui.app
 ```
 
 ### VPS / Railway / Fly / Render (outline)
 
-1. Build from this repo (`Dockerfile` or `pip install -e .`).
+1. Build from this repo (`Dockerfile` or `uv sync` on the host).
 2. Set env: `FAKU_API_KEY`, `FAKU_BASE_URL`, `FAKU_MODEL`.
 3. Expose port **7860** (UI) and/or **8000** (API).
 4. Persist `~/.faku` (or `/root/.faku`) if you want history + saved keys.
@@ -267,7 +293,7 @@ Example process (systemd-style):
 ```bash
 WorkingDirectory=/opt/fak-u-watermark
 Environment=FAKU_API_KEY=sk-...
-ExecStart=/opt/fak-u-watermark/.venv/bin/python -m ui.app
+ExecStart=/usr/local/bin/uv run --directory /opt/fak-u-watermark python -m ui.app
 ```
 
 ---
@@ -303,8 +329,8 @@ Then **Copy**, **Export**, or **Re-analyze cleaned** to verify the signal droppe
 ## Tests
 
 ```bash
-pip install -e ".[dev]"
-pytest -q
+uv sync --extra dev
+uv run pytest -q
 ```
 
 ---

@@ -1,7 +1,7 @@
 services:
   api:
     build: .
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    command: uv run uvicorn api.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
     environment:
@@ -14,7 +14,7 @@ services:
 
   ui:
     build: .
-    command: python -m ui.app
+    command: uv run python -m ui.app
     ports:
       - "7860:7860"
     environment:
