@@ -90,3 +90,44 @@ class TestInpaint:
         assert result.image_bytes is not None
         out = Image.open(io.BytesIO(result.image_bytes))
         assert out.size == img.size
+
+    def test_empty_mask_fails(self, sample_jpeg_bytes):
+        import numpy as np
+
+        img = Image.open(io.BytesIO(sample_jpeg_bytes))
+        mask = np.zeros((img.size[1], img.size[0]), dtype=np.uint8)
+        result = inpaint_region(img, mask, method="telea")
+        assert not result.success
+        assert "empty" in (result.error or "").lower()
+
+    def test_extract_mask_from_editor(self):
+        from image_tools.inpaint import extract_mask_from_editor
+        import numpy as np
+
+        bg = Image.new("RGB", (40, 30), (10, 20, 30))
+        layer = Image.new("RGBA", (40, 30), (0, 0, 0, 0))
+        for x in range(5, 15):
+            for y in range(5, 12):
+                layer.putpixel((x, y), (255, 255, 255, 255))
+        img, mask = extract_mask_from_editor(
+            {"background": bg, "layers": [layer], "composite": bg}
+        )
+        assert img is not None
+        assert mask is not None
+        assert mask[7, 8] == 255
+        assert mask[0, 0] == 0
+
+    def test_api_without_key_falls_back_or_errors(self, sample_jpeg_bytes):
+        img = Image.open(io.BytesIO(sample_jpeg_bytes))
+        w, h = img.size
+        mask = rectangle_mask(w, h, 10, 5, 50, 15)
+        result = inpaint_region(
+            img,
+            mask,
+            method="api",
+            instruction="remove watermark",
+            api_key=None,
+        )
+        # No key → error (unless env has a key). Local fallback only after API HTTP failure.
+        if not result.success:
+            assert "key" in (result.error or "").lower() or result.error

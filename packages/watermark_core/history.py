@@ -108,6 +108,28 @@ class HistoryStore:
             rows = conn.execute(query, params).fetchall()
         return [_row_to_entry(r) for r in rows]
 
+    def choices(self, kind: str | None = None, limit: int = 40) -> list[str]:
+        """Dropdown labels: ``{id8} · {timestamp} · {title}``."""
+        labels: list[str] = []
+        for e in self.list(kind=kind, limit=limit):
+            ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(e.created_at))
+            labels.append(f"{e.id[:8]} · {ts} · {e.title[:70]}")
+        return labels
+
+    def get_by_choice(self, label: str | None) -> HistoryEntry | None:
+        """Resolve a choices() label (or bare id prefix) to an entry."""
+        if not label or not str(label).strip():
+            return None
+        label = str(label).strip()
+        prefix = label.split("·", 1)[0].strip()
+        # Prefer full-id match via prefix
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM history WHERE id LIKE ? ORDER BY created_at DESC LIMIT 1",
+                (f"{prefix}%",),
+            ).fetchone()
+        return _row_to_entry(row) if row else None
+
     def get(self, entry_id: str) -> HistoryEntry | None:
         with self._connect() as conn:
             row = conn.execute(

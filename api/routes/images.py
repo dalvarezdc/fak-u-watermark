@@ -28,8 +28,11 @@ class InpaintRequest(BaseModel):
     x2: int | None = None
     y2: int | None = None
     instruction: str | None = None
-    method: str = "telea"
+    method: str = "telea"  # telea | ns | api | auto
     radius: int = 5
+    api_key: str | None = None
+    base_url: str | None = None
+    model: str | None = None
 
 
 def _decode_b64(data: str) -> bytes:
@@ -150,6 +153,9 @@ def inpaint_image(body: InpaintRequest) -> dict[str, Any]:
             instruction=body.instruction,
             method=body.method,
             radius=body.radius,
+            api_key=body.api_key,
+            base_url=body.base_url,
+            model=body.model,
         )
     except HTTPException:
         raise
@@ -167,6 +173,7 @@ def inpaint_image(body: InpaintRequest) -> dict[str, Any]:
             "type": "inpaint",
             "method": result.method,
             "instruction": body.instruction,
+            "image_b64": base64.b64encode(result.image_bytes).decode("ascii")[:200_000],
         },
     )
     return {

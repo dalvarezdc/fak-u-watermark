@@ -64,11 +64,20 @@ design_plan.md
 
 Presets: `kirchenbauer_default` (γ=0.25), `kirchenbauer_hard` (γ=0.5), `unigram_default`.
 
-## Images (offline)
+## Images
 
 - Read full metadata (Pillow + piexif).  
 - Strip all EXIF or edit Artist / Copyright / Description.  
-- Select a rectangle over a logo/watermark → local **OpenCV** inpainting.
+- **Brush** (or rectangle) over a logo/watermark → local **OpenCV** inpainting (offline).  
+- Optional **API** inpaint (`method=api|auto`) via OpenAI-compatible `images/edits`.  
+- Download cleaned images; restore past jobs from history.
+
+## Text UX
+
+- Soft yellow highlights + statistics  
+- Neutralize (subtle/strong) · **Copy** · Export `.txt` / annotated HTML  
+- **Re-analyze cleaned** text after edits  
+- Before/After panel · History restore
 
 ## Tests
 
