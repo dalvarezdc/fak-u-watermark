@@ -11,7 +11,7 @@ import struct
 from typing import Sequence
 
 from .base import WatermarkScheme
-from .kgw import _Xorshift64
+from .kgw import _Xorshift64, sample_green_ids
 
 
 class UnigramScheme(WatermarkScheme):
@@ -36,11 +36,6 @@ class UnigramScheme(WatermarkScheme):
         seed = int.from_bytes(hashlib.sha256(payload).digest()[:8], "little")
         rng = _Xorshift64(seed)
         k = max(1, int(self.gamma * vocab_size))
-        indices = list(range(vocab_size))
-        green: set[int] = set()
-        for i in range(k):
-            j = i + rng.randint(vocab_size - i)
-            indices[i], indices[j] = indices[j], indices[i]
-            green.add(indices[i])
+        green = set(sample_green_ids(rng, vocab_size, k))
         self._cache[vocab_size] = green
         return green

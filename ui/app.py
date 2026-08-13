@@ -10,6 +10,7 @@ import html
 import io
 import json
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -22,12 +23,20 @@ for p in (_PACKAGES, _ROOT):
         sys.path.insert(0, str(p))
 
 import gradio as gr
+from image_tools.c2pa_tools import detect_c2pa, strip_c2pa
+from image_tools.exif import read_exif, strip_exif, update_exif
+from image_tools.inpaint import extract_mask_from_editor, inpaint_region, rectangle_mask
 from PIL import Image
-
 from watermark_core.adaptive import neutralize_adaptive
 from watermark_core.analyzer import WatermarkAnalyzer
 from watermark_core.batch import analyze_batch_files, batch_to_markdown
-from watermark_core.density import density_summary, density_to_html, sliding_window_density
+from watermark_core.density import (
+    compress_density_points,
+    density_summary,
+    density_to_html,
+    sliding_window_density,
+)
+from watermark_core.diffview import compare_document, compare_html
 from watermark_core.history import HistoryStore
 from watermark_core.neutralize import NeutralizeConfig, neutralize_sync
 from watermark_core.schemes import PRESETS
@@ -36,27 +45,23 @@ from watermark_core.settings import (
     apply_provider_preset,
     clear_api_key,
     load_settings,
+    resolve_chat_model,
     save_settings,
     settings_path,
 )
 from watermark_core.targeted import neutralize_targeted
-from watermark_core.tokenizer import AVAILABLE_TOKENIZERS
-from watermark_core.visualization import tokens_to_annotated_document, tokens_to_html
-
-from image_tools.c2pa_tools import detect_c2pa, strip_c2pa
-from image_tools.exif import read_exif, strip_exif, update_exif
-from image_tools.inpaint import extract_mask_from_editor, inpaint_region, rectangle_mask
+from watermark_core.tokenizer import AVAILABLE_TOKENIZERS, tokenizer_error_message
 
 SOFT_YELLOW = "#FEF08A"
 HISTORY = HistoryStore()
-TMP = Path("/tmp/faku")
+TMP = Path(tempfile.gettempdir()) / "faku"
 TMP.mkdir(parents=True, exist_ok=True)
 _MAX_HISTORY_IMAGE_BYTES = 1_500_000
 
 CUSTOM_CSS = f"""
 /* ── App chrome ─────────────────────────────────────────── */
 .gradio-container {{
-  max-width: 1100px !important;
+  max-width: 1320px !important;
   margin: 0 auto !important;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif !important;
 }}
@@ -160,24 +165,39 @@ CUSTOM_CSS = f"""
 }}
 .stat-card .hint {{ font-size: 0.75rem; color: #a8a29e; margin-top: 0.15rem; }}
 
-/* ── Compare ────────────────────────────────────────────── */
-.faku-compare {{
-  display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem;
+/* ── Compare editors ────────────────────────────────────── */
+.faku-editor-hint {{
+  font-size: 0.88rem !important; color: #57534e !important; line-height: 1.45 !important;
 }}
-@media (max-width: 800px) {{ .faku-compare {{ grid-template-columns: 1fr; }} }}
-.faku-compare-col {{
-  background: #fffefb; border: 1px solid #e7e5e4; border-radius: 12px;
-  overflow: hidden;
+
+/* ── Compact toolbars ───────────────────────────────────── */
+#text-toolbar, #export-toolbar, #settings-toolbar, #image-toolbar {{
+  gap: 0.4rem !important;
+  align-items: center !important;
 }}
-.faku-compare-col header {{
-  font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.05em; color: #78716c;
-  padding: 0.55rem 0.9rem; background: #fafaf9; border-bottom: 1px solid #e7e5e4;
+#text-toolbar > *, #export-toolbar > *, #settings-toolbar > *, #image-toolbar > * {{
+  flex: 0 0 auto !important;
+  min-width: 0 !important;
+  width: auto !important;
 }}
-.faku-compare-col pre {{
-  font-family: Georgia, "Times New Roman", serif; font-size: 0.95rem; line-height: 1.65;
-  white-space: pre-wrap; word-break: break-word; color: #1c1917;
-  margin: 0; padding: 0.9rem 1rem; max-height: 16rem; overflow: auto;
+#text-toolbar button, #export-toolbar button,
+#settings-toolbar button, #image-toolbar button {{
+  width: auto !important;
+  min-width: 0 !important;
+  padding: 0.28rem 0.7rem !important;
+  font-size: 0.82rem !important;
+  font-weight: 600 !important;
+  border-radius: 8px !important;
+}}
+#text-toolbar label, #export-toolbar label {{
+  margin-bottom: 0 !important;
+}}
+#text-toolbar .block, #export-toolbar .block,
+#settings-toolbar .block, #image-toolbar .block {{
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
 }}
 
 /* ── Status toast ───────────────────────────────────────── */
@@ -191,62 +211,126 @@ footer {{ display: none !important; }}
 """
 
 
-def _verdict_html(stats: dict) -> str:
-    v = stats.get("verdict", "none")
-    label = stats.get("verdict_label", v)
-    z = stats.get("z_score", 0)
-    gf = stats.get("green_fraction", 0)
-    n = stats.get("total_tokens", 0)
-    tip = {
-        "detected": "Statistical green-list signal is strong for this config.",
-        "uncertain": "Some signal, but below the detection threshold — treat carefully.",
-        "none": "No strong watermark signal with the current key / scheme.",
-    }.get(v, "")
-    return f"""
-<div class="verdict-banner {html.escape(v)}">
-  <span class="verdict-pill">{html.escape(label)}</span>
-  <span class="verdict-meta">
-    <strong>z = {z:.2f}</strong> · green {gf:.1%} · {n} tokens scored<br/>
-    <span style="color:#78716c">{html.escape(tip)}</span>
-  </span>
-</div>
-"""
-
-
-def _stats_markdown(stats: dict) -> str:
-    """HTML metric cards (kept name for call sites)."""
-    items = [
-        ("Z-score", f"{stats.get('z_score', 0):.2f}", "vs threshold"),
-        ("Green %", f"{stats.get('green_fraction', 0):.1%}", "of scored tokens"),
-        ("Green / total", f"{stats.get('green_count', 0)}/{stats.get('total_tokens', 0)}", "tokens"),
-        ("P-value", f"{stats.get('p_value', 1):.1e}", "approx one-sided"),
-        ("Gamma", f"{stats.get('gamma', '—')}", "green-list size"),
-        ("Scheme", f"{stats.get('scheme', '—')}", f"thr {stats.get('threshold', 4.0)}"),
-    ]
-    cards = "".join(
-        f'<div class="stat-card"><div class="label">{html.escape(lab)}</div>'
-        f'<div class="value">{html.escape(str(val))}</div>'
-        f'<div class="hint">{html.escape(hint)}</div></div>'
-        for lab, val, hint in items
+def _make_analyzer(preset, scheme, gamma, key, tokenizer, threshold) -> WatermarkAnalyzer:
+    """Score with the visible fields. Preset only fills those fields in the UI."""
+    del preset
+    return WatermarkAnalyzer(
+        scheme=scheme,
+        gamma=float(gamma),
+        key=key.strip() if key else None,
+        tokenizer_name=tokenizer,
+        threshold=float(threshold),
     )
-    return f'<div class="stats-grid">{cards}</div>'
 
 
-def _compare_html(original: str, cleaned: str) -> str:
-    o = html.escape(original or "—")
-    c = html.escape(cleaned or "—")
-    return f"""
-<div class="faku-compare">
-  <div class="faku-compare-col">
-    <header>Original</header>
-    <pre>{o}</pre>
-  </div>
-  <div class="faku-compare-col">
-    <header>Cleaned</header>
-    <pre>{c}</pre>
-  </div>
-</div>
-"""
+def apply_text_preset(preset):
+    """Copy preset scheme / gamma / key into the editable fields."""
+    if not preset or preset == "(none)":
+        return gr.update(), gr.update(), gr.update()
+    p = PRESETS.get(preset) or {}
+    hash_key = p.get("hash_key", "")
+    return (
+        p.get("scheme", "kgw"),
+        float(p.get("gamma", 0.25)),
+        "" if hash_key is None else str(hash_key),
+    )
+
+
+def _analyze_pack(text: str, analyzer: WatermarkAnalyzer, density_window: int) -> dict | None:
+    if not text or not str(text).strip():
+        return None
+    result = analyzer.analyze(text)
+    points = compress_density_points(
+        sliding_window_density(
+            result.tokens, window=int(density_window or 20), gamma=result.gamma
+        )
+    )
+    return {
+        "text": text,
+        "tokens": [t.to_dict() for t in result.tokens if t.is_signal],
+        "statistics": result.statistics.to_dict(),
+        "density": [p.to_dict() for p in points],
+        "gamma": result.gamma,
+    }
+
+
+def _tokens_from_pack(pack: dict | None):
+    if not pack or "tokens" not in pack:
+        return None
+    from watermark_core.schemes.base import TokenInfo
+
+    return [TokenInfo(**t) for t in pack["tokens"]]
+
+
+def _current_pack(pack: dict | None, text: str) -> dict | None:
+    if not pack:
+        return None
+    if (pack.get("text") or "") != (text or ""):
+        return None
+    return pack
+
+
+def _render_compare(
+    left: dict | None,
+    right: dict | None,
+    old_text: str,
+    new_text: str,
+    show_highlights: bool,
+) -> str:
+    old_text = old_text or ""
+    new_text = new_text or ""
+    left_ok = _current_pack(left, old_text)
+    right_ok = _current_pack(right, new_text)
+    stale = (left is not None and left_ok is None and bool(old_text.strip())) or (
+        right is not None and right_ok is None and bool(new_text.strip())
+    )
+    return compare_html(
+        old_text,
+        new_text,
+        old_tokens=_tokens_from_pack(left_ok),
+        new_tokens=_tokens_from_pack(right_ok),
+        old_stats=(left_ok or {}).get("statistics"),
+        new_stats=(right_ok or {}).get("statistics"),
+        show_highlights=bool(show_highlights),
+        old_analyzed=left_ok is not None,
+        new_analyzed=right_ok is not None,
+        preview_unanalyzed=stale,
+    )
+
+
+def _heatmaps_html(left: dict | None, right: dict | None) -> tuple[str, str]:
+    from watermark_core.density import DensityPoint
+
+    parts: list[str] = []
+    metas: list[str] = []
+    for label, pack in (("Original", left), ("Cleaned", right)):
+        if not pack or not pack.get("density"):
+            continue
+        pts = [DensityPoint(**p) for p in pack["density"]]
+        parts.append(
+            f"<h4 style='margin:0.75rem 0 0.35rem;color:#57534e;font-size:0.85rem'>"
+            f"{html.escape(label)}</h4>"
+            + density_to_html(pts)
+        )
+        dsum = density_summary(pts)
+        metas.append(
+            f"{label}: mean={dsum['mean_fraction']:.1%} · max={dsum['max_fraction']:.1%} · "
+            f"hot (z≥4): {dsum['hot_spans']}"
+        )
+    if not parts:
+        return "", "—"
+    return "".join(parts), " · ".join(metas)
+
+
+def _score_note(left: dict | None, right: dict | None) -> str:
+    bits: list[str] = []
+    if left and left.get("statistics"):
+        s = left["statistics"]
+        bits.append(f"old z={s.get('z_score', 0):.2f} ({s.get('verdict_label', '')})")
+    if right and right.get("statistics"):
+        s = right["statistics"]
+        bits.append(f"new z={s.get('z_score', 0):.2f} ({s.get('verdict_label', '')})")
+    return " · ".join(bits)
 
 
 def _llm_config(style: str, api_key: str, base_url: str, model: str) -> NeutralizeConfig:
@@ -342,6 +426,7 @@ def settings_save_ui(provider, api_key, base_url, model, inpaint_model):
         s.api_key = api_key.strip()
     if inpaint_model is not None and str(inpaint_model).strip():
         s.inpaint_model = str(inpaint_model).strip()
+    s.model = resolve_chat_model(s.provider, s.base_url, s.model)
     save_settings(s)
     return (
         "(saved)" if s.api_key else "",
@@ -373,6 +458,7 @@ def settings_clear_key_ui():
 
 def analyze_text(
     text: str,
+    cleaned: str,
     preset: str,
     scheme: str,
     gamma: float,
@@ -382,116 +468,112 @@ def analyze_text(
     show_highlights: bool,
     density_window: int,
     *,
-    seed_cleaned: bool = True,
     source_label: str = "Analyze",
 ):
-    if not text or not text.strip():
-        empty = "<em>Paste or upload text, then click Analyze.</em>"
-        cleaned_val = (text or "") if seed_cleaned else gr.update()
-        return empty, "—", "", cleaned_val, None, "—", empty, "—"
+    text = text or ""
+    cleaned = cleaned or ""
+    if not text.strip() and not cleaned.strip():
+        return (
+            compare_html("", ""),
+            None,
+            "",
+            "—",
+            "Paste text on the left (or both sides), then Analyze.",
+        )
 
-    preset_arg = preset if preset and preset != "(none)" else None
-    analyzer = WatermarkAnalyzer(
-        scheme=scheme,
-        gamma=float(gamma),
-        key=key.strip() if key else None,
-        tokenizer_name=tokenizer,
-        threshold=float(threshold),
-        preset=preset_arg,
-    )
-    result = analyzer.analyze(text)
-    stats = result.statistics.to_dict()
-    highlighted = tokens_to_html(
-        result.tokens, show_highlights=show_highlights, wrap=True, include_style=True
-    )
-    points = sliding_window_density(
-        result.tokens, window=int(density_window or 20), gamma=result.gamma
-    )
-    heat = density_to_html(points)
-    dsum = density_summary(points)
-    heat_meta = (
-        f"Density window={int(density_window)} · mean={dsum['mean_fraction']:.1%} · "
-        f"max={dsum['max_fraction']:.1%} · hot tokens (local z≥4): {dsum['hot_spans']}"
-    )
-
-    state = {
-        "tokens": [t.to_dict() for t in result.tokens],
-        "statistics": stats,
-        "text": text,
-        "density": [p.to_dict() for p in points],
-        "config": {
-            "preset": preset,
-            "scheme": scheme,
-            "gamma": float(gamma),
-            "key": key,
-            "tokenizer": tokenizer,
-            "threshold": float(threshold),
-            "density_window": int(density_window or 20),
-        },
+    try:
+        analyzer = _make_analyzer(preset, scheme, gamma, key, tokenizer, threshold)
+        left = _analyze_pack(text, analyzer, density_window)
+        right = _analyze_pack(cleaned, analyzer, density_window)
+    except Exception as exc:  # noqa: BLE001 — surface tokenizer / scoring errors
+        return (
+            compare_html(text, cleaned),
+            None,
+            "",
+            "—",
+            f"⚠️ {tokenizer_error_message(exc, tokenizer or 'gpt2')}",
+        )
+    config = {
+        "preset": preset,
+        "scheme": scheme,
+        "gamma": float(gamma),
+        "key": key,
+        "tokenizer": tokenizer,
+        "threshold": float(threshold),
+        "density_window": int(density_window or 20),
     }
+    state = {"left": left, "right": right, "config": config}
+    preview_src = text.strip() or cleaned.strip()
     HISTORY.add(
         kind="text",
-        title=f"{source_label}: {text.strip().replace(chr(10), ' ')[:60]}",
+        title=f"{source_label}: {preview_src.replace(chr(10), ' ')[:60]}",
         payload={
             "type": "analyze",
             "text": text[:100_000],
-            "statistics": stats,
-            "preview": text[:500],
-            "config": state["config"],
+            "cleaned": cleaned[:100_000],
+            "original": text[:100_000],
+            "statistics": (left or {}).get("statistics"),
+            "right_statistics": (right or {}).get("statistics"),
+            "preview": preview_src[:500],
+            "config": config,
         },
     )
-    cleaned_val = text if seed_cleaned else gr.update()
+    heat, heat_meta = _heatmaps_html(left, right)
+    scored = _score_note(left, right)
+    note = f"✓ Analyzed. {scored}" if scored else "✓ Analyzed."
+    if len(text) + len(cleaned) >= 8_000:
+        note += " Large document — green lists are cached; Neutralize splits into sections."
     return (
-        highlighted,
-        _verdict_html(stats),
-        _stats_markdown(stats),
-        cleaned_val,
+        _render_compare(left, right, text, cleaned, show_highlights),
         state,
-        _compare_html(text, text if seed_cleaned else ""),
         heat,
         heat_meta,
+        note,
     )
 
 
-def reanalyze_cleaned(
-    cleaned, preset, scheme, gamma, key, tokenizer, threshold, show_highlights, density_window
+def toggle_highlights(text, cleaned, show: bool, state: dict | None):
+    left = (state or {}).get("left") if state else None
+    right = (state or {}).get("right") if state else None
+    return _render_compare(left, right, text or "", cleaned or "", show)
+
+
+def neutralize_paraphrase(
+    text,
+    cleaned,
+    style,
+    api_key,
+    base_url,
+    model,
+    preset,
+    scheme,
+    gamma,
+    key,
+    tokenizer,
+    threshold,
+    show_highlights,
+    density_window,
 ):
-    hl, verdict, stats_md, _, state, _, heat, heat_meta = analyze_text(
-        cleaned,
-        preset,
-        scheme,
-        gamma,
-        key,
-        tokenizer,
-        threshold,
-        show_highlights,
-        density_window,
-        seed_cleaned=False,
-        source_label="Re-analyze cleaned",
-    )
-    note = "✓ Re-analyzed cleaned text."
-    if state and state.get("statistics"):
-        s = state["statistics"]
-        note += f" Z={s.get('z_score', 0):.2f} · {s.get('verdict_label', '')}"
-    return hl, verdict, stats_md, state, note, heat, heat_meta
-
-
-def toggle_highlights(show: bool, state: dict | None):
-    if not state or "tokens" not in state:
-        return "<em>No analysis yet.</em>"
-    from watermark_core.schemes.base import TokenInfo
-
-    tokens = [TokenInfo(**t) for t in state["tokens"]]
-    return tokens_to_html(tokens, show_highlights=show, wrap=True, include_style=True)
-
-
-def neutralize_paraphrase(text, style, api_key, base_url, model):
     if not text or not text.strip():
-        return "", "Provide text to neutralize.", "—"
+        return (
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            "Provide original text on the left.",
+        )
     config = _llm_config(style, api_key, base_url, model)
     result = neutralize_sync(text, config)
     if not result.success:
-        return text, f"⚠️ {result.error}", _compare_html(text, text)
+        return (
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            f"⚠️ {result.error}",
+        )
     HISTORY.add(
         kind="text",
         title=f"Neutralize ({style}): {text.strip().replace(chr(10), ' ')[:50]}",
@@ -504,24 +586,55 @@ def neutralize_paraphrase(text, style, api_key, base_url, model):
             "model": result.model,
         },
     )
+    compare, state, heat, heat_meta, note = analyze_text(
+        text,
+        result.cleaned,
+        preset,
+        scheme,
+        gamma,
+        key,
+        tokenizer,
+        threshold,
+        show_highlights,
+        density_window,
+        source_label=f"Neutralize ({style})",
+    )
     return (
         result.cleaned,
-        f"✓ Paraphrased with `{result.model}` ({result.style}).",
-        _compare_html(text, result.cleaned),
+        compare,
+        state,
+        heat,
+        heat_meta,
+        (
+            f"✓ Paraphrased with `{result.model}` ({result.style})"
+            + (f", {result.chunks} sections" if result.chunks > 1 else "")
+            + f". {note}"
+        ),
     )
 
 
-def neutralize_targeted_ui(text, preset, scheme, gamma, key, tokenizer):
+def neutralize_targeted_ui(
+    text,
+    cleaned,
+    preset,
+    scheme,
+    gamma,
+    key,
+    tokenizer,
+    threshold,
+    show_highlights,
+    density_window,
+):
     if not text or not text.strip():
-        return "", "Provide text.", "—"
-    preset_arg = preset if preset and preset != "(none)" else None
-    analyzer = WatermarkAnalyzer(
-        scheme=scheme,
-        gamma=float(gamma),
-        key=key.strip() if key else None,
-        tokenizer_name=tokenizer,
-        preset=preset_arg,
-    )
+        return (
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            "Provide original text on the left.",
+        )
+    analyzer = _make_analyzer(preset, scheme, gamma, key, tokenizer, threshold)
     result = neutralize_targeted(text, analyzer=analyzer)
     HISTORY.add(
         kind="text",
@@ -533,27 +646,57 @@ def neutralize_targeted_ui(text, preset, scheme, gamma, key, tokenizer):
             "notes": result.notes,
         },
     )
+    compare, state, heat, heat_meta, note = analyze_text(
+        text,
+        result.cleaned,
+        preset,
+        scheme,
+        gamma,
+        key,
+        tokenizer,
+        threshold,
+        show_highlights,
+        density_window,
+        source_label="Targeted",
+    )
     return (
         result.cleaned,
-        f"✓ Offline targeted: {result.notes}",
-        _compare_html(text, result.cleaned),
+        compare,
+        state,
+        heat,
+        heat_meta,
+        f"✓ Offline targeted: {result.notes} {note}",
     )
 
 
 def neutralize_adaptive_ui(
-    text, style, max_rounds, target_z, api_key, base_url, model, preset, scheme, gamma, key, tokenizer
+    text,
+    cleaned,
+    style,
+    max_rounds,
+    target_z,
+    api_key,
+    base_url,
+    model,
+    preset,
+    scheme,
+    gamma,
+    key,
+    tokenizer,
+    threshold,
+    show_highlights,
+    density_window,
 ):
     if not text or not text.strip():
-        return "", "Provide text.", "—"
-    preset_arg = preset if preset and preset != "(none)" else None
-    analyzer = WatermarkAnalyzer(
-        scheme=scheme,
-        gamma=float(gamma),
-        key=key.strip() if key else None,
-        tokenizer_name=tokenizer,
-        preset=preset_arg,
-        threshold=float(target_z),
-    )
+        return (
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            "Provide original text on the left.",
+        )
+    analyzer = _make_analyzer(preset, scheme, gamma, key, tokenizer, target_z)
     config = _llm_config(style, api_key, base_url, model)
     result = neutralize_adaptive(
         text,
@@ -578,7 +721,20 @@ def neutralize_adaptive_ui(
             "z_scores": result.z_scores,
         },
     )
-    return result.cleaned, note, _compare_html(text, result.cleaned)
+    compare, state, heat, heat_meta, scored = analyze_text(
+        text,
+        result.cleaned,
+        preset,
+        scheme,
+        gamma,
+        key,
+        tokenizer,
+        threshold,
+        show_highlights,
+        density_window,
+        source_label="Adaptive",
+    )
+    return result.cleaned, compare, state, heat, heat_meta, f"{note} {scored}"
 
 
 def copy_status(cleaned: str) -> str:
@@ -595,30 +751,25 @@ def export_plain(cleaned: str) -> str | None:
     return str(path)
 
 
-def export_html(state: dict | None, cleaned: str) -> str | None:
-    from watermark_core.schemes.base import TokenInfo
-
+def export_html(state: dict | None, text: str, cleaned: str) -> str | None:
     path = TMP / f"annotated_{int(time.time())}.html"
-    if state and "tokens" in state:
-        tokens = [TokenInfo(**t) for t in state["tokens"]]
-        doc = tokens_to_annotated_document(
-            tokens, title="fak-u-watermark export", statistics=state.get("statistics")
-        )
-        if state.get("density"):
-            from watermark_core.density import DensityPoint
-
-            pts = [DensityPoint(**p) for p in state["density"]]
-            doc = doc.replace(
-                "</body>",
-                f"<h2>Density heatmap</h2>{density_to_html(pts)}</body>",
-            )
-        if cleaned:
-            doc = doc.replace(
-                "</body>",
-                f"<h2>Cleaned text</h2><pre>{html.escape(cleaned)}</pre></body>",
-            )
-    else:
-        doc = f"<!DOCTYPE html><html><body><pre>{html.escape(cleaned or '')}</pre></body></html>"
+    text = text or ""
+    cleaned = cleaned or ""
+    left = (state or {}).get("left") if state else None
+    right = (state or {}).get("right") if state else None
+    left_ok = _current_pack(left, text)
+    right_ok = _current_pack(right, cleaned)
+    if not text and not cleaned:
+        return None
+    doc = compare_document(
+        text,
+        cleaned,
+        old_tokens=_tokens_from_pack(left_ok),
+        new_tokens=_tokens_from_pack(right_ok),
+        old_stats=(left_ok or {}).get("statistics"),
+        new_stats=(right_ok or {}).get("statistics"),
+        title="fak-u-watermark compare",
+    )
     path.write_text(doc, encoding="utf-8")
     return str(path)
 
@@ -633,13 +784,13 @@ def restore_text_history(label: str | None):
     if not entry:
         return gr.update(), gr.update(), "—", "No history entry selected.", "—"
     p = entry.payload or {}
-    original = p.get("text") or p.get("original") or p.get("preview") or ""
-    cleaned = p.get("cleaned") or original
+    original = p.get("original") or p.get("text") or p.get("preview") or ""
+    cleaned = p.get("cleaned") or ""
     return (
         original,
         cleaned,
-        _compare_html(original, cleaned),
-        f"✓ Restored **{entry.title}** (`{entry.id[:8]}`)",
+        _render_compare(None, None, original, cleaned, True),
+        f"✓ Restored **{entry.title}** (`{entry.id[:8]}`). Click Analyze to highlight both sides.",
         "—",
     )
 
@@ -665,15 +816,18 @@ def batch_analyze_ui(files, preset, scheme, gamma, key, tokenizer, threshold):
         if p:
             paths.append(p)
     preset_arg = preset if preset and preset != "(none)" else None
-    results = analyze_batch_files(
-        paths,
-        scheme=scheme,
-        gamma=float(gamma),
-        key=key.strip() if key else None,
-        tokenizer_name=tokenizer,
-        preset=preset_arg,
-        threshold=float(threshold),
-    )
+    try:
+        results = analyze_batch_files(
+            paths,
+            scheme=scheme,
+            gamma=float(gamma),
+            key=key.strip() if key else None,
+            tokenizer_name=tokenizer,
+            preset=preset_arg,
+            threshold=float(threshold),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"⚠️ {tokenizer_error_message(exc, tokenizer or 'gpt2')}"
     return batch_to_markdown(results)
 
 
@@ -877,8 +1031,8 @@ def build_app() -> gr.Blocks:
   <div class="faku-steps">
     <span class="faku-step"><em>1</em> Paste / upload</span>
     <span class="faku-step"><em>2</em> Analyze</span>
-    <span class="faku-step"><em>3</em> Review highlights</span>
-    <span class="faku-step"><em>4</em> Neutralize · copy · export</span>
+    <span class="faku-step"><em>3</em> Compare old vs new</span>
+    <span class="faku-step"><em>4</em> Edit · re-analyze · export</span>
   </div>
 </div>
             """
@@ -900,7 +1054,9 @@ Also works with env vars: `FAKU_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, 
                         value="custom",
                         label="Provider preset",
                     )
-                    btn_apply_provider = gr.Button("Apply preset URLs")
+                    btn_apply_provider = gr.Button(
+                        "Apply preset URLs", size="sm", scale=0, min_width=110
+                    )
                 set_api_key = gr.Textbox(
                     label="API key",
                     type="password",
@@ -915,10 +1071,12 @@ Also works with env vars: `FAKU_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, 
                     label="Inpaint model (images/edits)",
                     placeholder="dall-e-2",
                 )
-                with gr.Row():
-                    btn_save_settings = gr.Button("Save settings", variant="primary")
-                    btn_load_settings = gr.Button("Reload")
-                    btn_clear_key = gr.Button("Clear API key")
+                with gr.Row(elem_id="settings-toolbar"):
+                    btn_save_settings = gr.Button(
+                        "Save settings", variant="primary", size="sm", scale=0, min_width=80
+                    )
+                    btn_load_settings = gr.Button("Reload", size="sm", scale=0, min_width=60)
+                    btn_clear_key = gr.Button("Clear API key", size="sm", scale=0, min_width=80)
                 settings_status = gr.Markdown()
 
                 gr.Markdown(
@@ -928,7 +1086,7 @@ Also works with env vars: `FAKU_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, 
 | Provider | Base URL | Example model |
 |----------|----------|---------------|
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
-| DeepSeek | `https://api.deepseek.com` | `deepseek-chat` |
+| DeepSeek | `https://api.deepseek.com` | `deepseek-v4-flash` |
 | xAI Grok | `https://api.x.ai/v1` | `grok-2-latest` |
 
 CLI: `faku settings set --api-key sk-... --provider openai`
@@ -995,31 +1153,34 @@ CLI: `faku settings set --api-key sk-... --provider openai`
                 analysis_state = gr.State(None)
 
                 gr.Markdown(
-                    "### 1 · Your text\n"
-                    "Paste a chapter, article, or model output. Long documents scroll in the panels below."
+                    "### Compare original vs cleaned\n"
+                    "Left is **old**, right is **new**. Edit either side, then Analyze. "
+                    "Neutralize writes a cleaned draft on the right."
                 )
-                text_in = gr.Textbox(
-                    label="Input",
-                    placeholder="Paste text here… (long chapters are fine)",
-                    lines=14,
-                    max_lines=30,
-                    elem_id="input-text",
-                )
-                with gr.Row():
-                    file_in = gr.File(
-                        label="Or upload .txt / .md",
+                with gr.Row(elem_id="text-toolbar"):
+                    file_in = gr.UploadButton(
+                        "Upload .txt / .md",
                         file_types=[".txt", ".md", ".text"],
                         type="filepath",
-                        scale=2,
+                        size="sm",
+                        scale=0,
+                        min_width=90,
                     )
+                    btn_analyze = gr.Button(
+                        "Analyze", variant="primary", size="sm", scale=0, min_width=70
+                    )
+                    btn_neu = gr.Button("Neutralize", size="sm", scale=0, min_width=80)
+                    btn_targeted = gr.Button("Targeted", size="sm", scale=0, min_width=70)
+                    btn_adaptive = gr.Button("Adaptive", size="sm", scale=0, min_width=70)
                     show_hl = gr.Checkbox(
-                        value=True, label="Yellow highlights on", scale=1
+                        value=True, label="Yellow marks", scale=0, min_width=110
                     )
 
                 with gr.Accordion("Watermark settings (optional)", open=False):
                     gr.Markdown(
-                        "Defaults match classic Kirchenbauer (γ=0.25). "
-                        "Change only if you know the scheme / secret key."
+                        "Preset fills scheme, γ, and key. Override those fields afterward "
+                        "(needed for Targeted with a custom key). Default is classic "
+                        "Kirchenbauer (γ=0.25)."
                     )
                     with gr.Row():
                         preset = gr.Dropdown(
@@ -1043,13 +1204,6 @@ CLI: `faku settings set --api-key sk-... --provider openai`
                         )
                     key = gr.Textbox(label="Secret key / seed", value="15485863")
 
-                with gr.Row():
-                    btn_analyze = gr.Button("Analyze", variant="primary", size="lg")
-                    btn_neu = gr.Button("Neutralize (paraphrase)", size="lg")
-                    btn_targeted = gr.Button("Targeted (offline)")
-                    btn_adaptive = gr.Button("Adaptive")
-                    btn_reanalyze = gr.Button("Re-check cleaned")
-
                 with gr.Accordion("Paraphrase / API options", open=False):
                     style = gr.Radio(
                         choices=["subtle", "strong"],
@@ -1072,46 +1226,43 @@ CLI: `faku settings set --api-key sk-... --provider openai`
                             1.0, 8.0, value=4.0, step=0.5, label="Adaptive target z"
                         )
 
-                gr.Markdown("### 2 · Results")
-                verdict_out = gr.HTML(
-                    value='<p style="color:#78716c">Click <strong>Analyze</strong> to see the verdict.</p>'
+                status_out = gr.Markdown()
+
+                with gr.Row(equal_height=True):
+                    with gr.Column():
+                        text_in = gr.Textbox(
+                            label="Original (old) · editable",
+                            placeholder="Paste original text here…",
+                            lines=10,
+                            max_lines=22,
+                            elem_id="input-text",
+                        )
+                    with gr.Column():
+                        cleaned_out = gr.Textbox(
+                            label="Cleaned (new) · editable",
+                            placeholder="Neutralize, or paste a candidate to compare…",
+                            lines=10,
+                            max_lines=22,
+                            interactive=True,
+                            elem_id="cleaned-text",
+                        )
+
+                compare_out = gr.HTML(
+                    value=compare_html("", ""),
                 )
-                stats_out = gr.HTML()
-                gr.HTML('<div class="faku-section-label">Highlighted text</div>')
-                gr.Markdown(
-                    "*Yellow marks = tokens on the reconstructed green list (hover for tip). "
-                    "Scroll inside the panel for long chapters.*"
-                )
-                highlighted_out = gr.HTML(
-                    value='<p class="watermark-empty" style="color:#78716c;font-style:italic">'
-                    "Highlights appear here after Analyze.</p>"
-                )
+
+                with gr.Row(elem_id="export-toolbar"):
+                    btn_copy = gr.Button("Copy", variant="primary", size="sm", scale=0, min_width=60)
+                    btn_export_txt = gr.DownloadButton(
+                        "Export .txt", size="sm", scale=0, min_width=80
+                    )
+                    btn_export_html = gr.DownloadButton(
+                        "Export .html", size="sm", scale=0, min_width=80
+                    )
 
                 with gr.Accordion("Density heatmap (where the signal clusters)", open=False):
                     heat_meta = gr.Markdown()
                     heat_out = gr.HTML()
-
-                gr.Markdown("### 3 · Cleaned output")
-                cleaned_out = gr.Textbox(
-                    label="Editable cleaned text",
-                    lines=12,
-                    max_lines=28,
-                    interactive=True,
-                    elem_id="cleaned-text",
-                    placeholder="After neutralize, edit freely here…",
-                )
-                status_out = gr.Markdown()
-
-                with gr.Row():
-                    btn_copy = gr.Button("Copy cleaned", variant="primary")
-                    btn_export_txt = gr.Button("Export .txt")
-                    btn_export_html = gr.Button("Export .html")
-                with gr.Row():
-                    export_txt = gr.File(label="Download .txt")
-                    export_html_f = gr.File(label="Download .html")
-
-                with gr.Accordion("Before / after comparison", open=False):
-                    compare_out = gr.HTML(value="—")
 
                 with gr.Accordion("Batch · history", open=False):
                     gr.Markdown("#### Batch analyze")
@@ -1119,20 +1270,29 @@ CLI: `faku settings set --api-key sk-... --provider openai`
                         label="Multiple .txt / .md files",
                         file_count="multiple",
                         type="filepath",
+                        height=90,
                     )
-                    btn_batch = gr.Button("Run batch")
+                    btn_batch = gr.Button("Run batch", size="sm", scale=0, min_width=80)
                     batch_out = gr.Markdown()
                     gr.Markdown("#### History")
                     hist_dd = gr.Dropdown(label="Past text jobs", choices=[])
                     with gr.Row():
-                        btn_refresh_hist = gr.Button("Refresh")
-                        btn_restore_hist = gr.Button("Restore selected", variant="primary")
+                        btn_refresh_hist = gr.Button("Refresh", size="sm", scale=0, min_width=70)
+                        btn_restore_hist = gr.Button(
+                            "Restore", variant="primary", size="sm", scale=0, min_width=70
+                        )
                     hist_status = gr.Markdown()
 
-                file_in.change(on_file_upload, inputs=[file_in], outputs=[text_in])
+                file_in.upload(on_file_upload, inputs=[file_in], outputs=[text_in])
+                preset.change(
+                    apply_text_preset,
+                    inputs=[preset],
+                    outputs=[scheme, gamma, key],
+                )
 
                 analyze_inputs = [
                     text_in,
+                    cleaned_out,
                     preset,
                     scheme,
                     gamma,
@@ -1143,36 +1303,68 @@ CLI: `faku settings set --api-key sk-... --provider openai`
                     density_window,
                 ]
                 analyze_outputs = [
-                    highlighted_out,
-                    verdict_out,
-                    stats_out,
-                    cleaned_out,
-                    analysis_state,
                     compare_out,
+                    analysis_state,
                     heat_out,
                     heat_meta,
+                    status_out,
+                ]
+                neutralize_outputs = [
+                    cleaned_out,
+                    compare_out,
+                    analysis_state,
+                    heat_out,
+                    heat_meta,
+                    status_out,
                 ]
 
                 btn_analyze.click(analyze_text, inputs=analyze_inputs, outputs=analyze_outputs)
                 show_hl.change(
                     toggle_highlights,
-                    inputs=[show_hl, analysis_state],
-                    outputs=[highlighted_out],
+                    inputs=[text_in, cleaned_out, show_hl, analysis_state],
+                    outputs=[compare_out],
                 )
                 btn_neu.click(
                     neutralize_paraphrase,
-                    inputs=[text_in, style, api_key, base_url, model],
-                    outputs=[cleaned_out, status_out, compare_out],
+                    inputs=[
+                        text_in,
+                        cleaned_out,
+                        style,
+                        api_key,
+                        base_url,
+                        model,
+                        preset,
+                        scheme,
+                        gamma,
+                        key,
+                        tokenizer,
+                        threshold,
+                        show_hl,
+                        density_window,
+                    ],
+                    outputs=neutralize_outputs,
                 )
                 btn_targeted.click(
                     neutralize_targeted_ui,
-                    inputs=[text_in, preset, scheme, gamma, key, tokenizer],
-                    outputs=[cleaned_out, status_out, compare_out],
+                    inputs=[
+                        text_in,
+                        cleaned_out,
+                        preset,
+                        scheme,
+                        gamma,
+                        key,
+                        tokenizer,
+                        threshold,
+                        show_hl,
+                        density_window,
+                    ],
+                    outputs=neutralize_outputs,
                 )
                 btn_adaptive.click(
                     neutralize_adaptive_ui,
                     inputs=[
                         text_in,
+                        cleaned_out,
                         style,
                         max_rounds,
                         target_z,
@@ -1184,31 +1376,11 @@ CLI: `faku settings set --api-key sk-... --provider openai`
                         gamma,
                         key,
                         tokenizer,
-                    ],
-                    outputs=[cleaned_out, status_out, compare_out],
-                )
-                btn_reanalyze.click(
-                    reanalyze_cleaned,
-                    inputs=[
-                        cleaned_out,
-                        preset,
-                        scheme,
-                        gamma,
-                        key,
-                        tokenizer,
                         threshold,
                         show_hl,
                         density_window,
                     ],
-                    outputs=[
-                        highlighted_out,
-                        verdict_out,
-                        stats_out,
-                        analysis_state,
-                        status_out,
-                        heat_out,
-                        heat_meta,
-                    ],
+                    outputs=neutralize_outputs,
                 )
                 btn_copy.click(
                     fn=copy_status,
@@ -1216,9 +1388,13 @@ CLI: `faku settings set --api-key sk-... --provider openai`
                     outputs=[status_out],
                     js="(text) => { if (text) { navigator.clipboard.writeText(text); } return [text]; }",
                 )
-                btn_export_txt.click(export_plain, inputs=[cleaned_out], outputs=[export_txt])
+                btn_export_txt.click(
+                    export_plain, inputs=[cleaned_out], outputs=[btn_export_txt]
+                )
                 btn_export_html.click(
-                    export_html, inputs=[analysis_state, cleaned_out], outputs=[export_html_f]
+                    export_html,
+                    inputs=[analysis_state, text_in, cleaned_out],
+                    outputs=[btn_export_html],
                 )
                 btn_batch.click(
                     batch_analyze_ui,
@@ -1244,20 +1420,27 @@ CLI: `faku settings set --api-key sk-... --provider openai`
                         img_in = gr.Image(
                             label="Upload", type="pil", sources=["upload", "clipboard"]
                         )
-                        with gr.Row():
-                            btn_exif = gr.Button("Read EXIF", variant="primary")
-                            btn_strip = gr.Button("Strip metadata")
-                        with gr.Row():
-                            btn_c2pa = gr.Button("Detect C2PA")
-                            btn_c2pa_strip = gr.Button("Strip C2PA")
+                        with gr.Row(elem_id="image-toolbar"):
+                            btn_exif = gr.Button(
+                                "Read EXIF", variant="primary", size="sm", scale=0, min_width=70
+                            )
+                            btn_strip = gr.Button("Strip metadata", size="sm", scale=0, min_width=80)
+                            btn_c2pa = gr.Button("Detect C2PA", size="sm", scale=0, min_width=80)
+                            btn_c2pa_strip = gr.Button(
+                                "Strip C2PA", size="sm", scale=0, min_width=80
+                            )
                         with gr.Accordion("Edit metadata fields", open=False):
                             artist = gr.Textbox(label="Artist")
                             copyright_ = gr.Textbox(label="Copyright")
                             description = gr.Textbox(label="ImageDescription")
-                            btn_update = gr.Button("Apply field updates")
+                            btn_update = gr.Button(
+                                "Apply field updates", size="sm", scale=0, min_width=90
+                            )
                     with gr.Column():
                         img_out = gr.Image(label="Result", type="pil")
-                        img_download = gr.File(label="Download cleaned image")
+                        img_download = gr.DownloadButton(
+                            "Download image", size="sm", scale=0, min_width=90
+                        )
                         img_status = gr.Markdown()
                         exif_out = gr.Code(label="Metadata / C2PA report", language="json", lines=12)
 
@@ -1289,13 +1472,17 @@ CLI: `faku settings set --api-key sk-... --provider openai`
                     inpaint_key = gr.Textbox(label="API key", type="password")
                     inpaint_base = gr.Textbox(label="Base URL")
                     inpaint_model = gr.Textbox(label="Model", placeholder="dall-e-2")
-                btn_inpaint = gr.Button("Remove painted region", variant="primary")
+                btn_inpaint = gr.Button(
+                    "Remove painted region", variant="primary", size="sm", scale=0, min_width=120
+                )
 
                 with gr.Accordion("Image history", open=False):
                     img_hist_dd = gr.Dropdown(label="Past image jobs", choices=[])
                     with gr.Row():
-                        btn_img_hist = gr.Button("Refresh")
-                        btn_img_restore = gr.Button("Restore selected", variant="primary")
+                        btn_img_hist = gr.Button("Refresh", size="sm", scale=0, min_width=70)
+                        btn_img_restore = gr.Button(
+                            "Restore", variant="primary", size="sm", scale=0, min_width=70
+                        )
                     img_hist_status = gr.Markdown()
 
                 img_in.change(load_image_into_mask_editor, inputs=[img_in], outputs=[mask_editor])
@@ -1352,9 +1539,9 @@ CLI: `faku settings set --api-key sk-... --provider openai`
 
 1. **Tokenize** (default GPT-2) and reconstruct the green list from previous tokens + key.  
 2. **Score** green fraction → z-score and a clear verdict.  
-3. **Show** soft yellow highlights (and optional density heatmap).  
+3. **Compare** original (left) vs cleaned (right) with yellow watermark marks and rose/green wording changes.  
 4. **Remove** via paraphrase (API), targeted synonyms (offline), or adaptive loops.  
-5. **Copy / export** and re-check the cleaned text.
+5. **Edit either side**, Analyze again, then copy / export.
 
 **Images:** EXIF · C2PA markers · brush inpaint (local OpenCV or API).
 
@@ -1406,6 +1593,7 @@ def main():
         server_port=port,
         css=CUSTOM_CSS,
         theme=theme,
+        allowed_paths=[str(TMP)],
         inbrowser=os.environ.get("FAKU_UI_INBROWSER", "1") not in ("0", "false", "False"),
     )
 

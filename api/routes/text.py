@@ -14,12 +14,12 @@ router = APIRouter(prefix="/text", tags=["text"])
 
 class AnalyzeRequest(BaseModel):
     text: str
-    scheme: str = "kgw"
-    gamma: float = Field(default=0.25, gt=0.0, lt=1.0)
+    scheme: str | None = None
+    gamma: float | None = None
     key: str | int | None = None
-    tokenizer_name: str = "gpt2"
-    window: int = Field(default=1, ge=1)
-    threshold: float = 4.0
+    tokenizer_name: str | None = None
+    window: int | None = None
+    threshold: float | None = None
     preset: str | None = None
     density_window: int = Field(default=20, ge=3, le=200)
     save_history: bool = True
@@ -36,10 +36,10 @@ class NeutralizeRequest(BaseModel):
 
 class TargetedRequest(BaseModel):
     text: str
-    scheme: str = "kgw"
-    gamma: float = 0.25
+    scheme: str | None = None
+    gamma: float | None = None
     key: str | int | None = None
-    tokenizer_name: str = "gpt2"
+    tokenizer_name: str | None = None
     preset: str | None = None
     save_history: bool = True
 
@@ -49,10 +49,11 @@ class AdaptiveRequest(BaseModel):
     style: Literal["subtle", "strong"] = "subtle"
     max_rounds: int = Field(default=3, ge=1, le=8)
     target_z: float = 4.0
-    scheme: str = "kgw"
-    gamma: float = 0.25
+    scheme: str | None = None
+    gamma: float | None = None
     key: str | int | None = None
-    tokenizer_name: str = "gpt2"
+    tokenizer_name: str | None = None
+    preset: str | None = None
     api_key: str | None = None
     base_url: str | None = None
     model: str | None = None
@@ -61,12 +62,12 @@ class AdaptiveRequest(BaseModel):
 
 class BatchRequest(BaseModel):
     items: list[dict[str, str]]  # [{name, text}, ...]
-    scheme: str = "kgw"
-    gamma: float = 0.25
+    scheme: str | None = None
+    gamma: float | None = None
     key: str | int | None = None
-    tokenizer_name: str = "gpt2"
+    tokenizer_name: str | None = None
     preset: str | None = None
-    threshold: float = 4.0
+    threshold: float | None = None
 
 
 class SettingsUpdate(BaseModel):
@@ -272,6 +273,7 @@ def neutralize_adaptive_endpoint(body: AdaptiveRequest) -> dict[str, Any]:
         key=body.key,
         tokenizer_name=body.tokenizer_name,
         threshold=body.target_z,
+        preset=body.preset,
     )
     config = NeutralizeConfig.from_env(style=body.style)
     if body.api_key:

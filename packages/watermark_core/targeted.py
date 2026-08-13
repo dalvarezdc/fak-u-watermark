@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from .analyzer import AnalysisResult, WatermarkAnalyzer
+from .analyzer import WatermarkAnalyzer
 from .tokenizer import encode_with_offsets, load_tokenizer, vocab_size
 
 # Small built-in synonym map (word → alternatives). Expand as needed.
@@ -128,6 +128,7 @@ def neutralize_targeted(
     replacements: list[dict] = []
     # Track reconstructed token stream for context (approx)
     rebuilt_ids: list[int] = []
+    window = max(1, int(getattr(analyzer, "window", 1)))
 
     for i, (tid, tstr, (start, end)) in enumerate(zip(token_ids, token_strings, offsets)):
         # Preserve any characters between previous end and this start
@@ -137,14 +138,16 @@ def neutralize_targeted(
 
         is_green = False
         if not (i == 0 and analyzer.scheme_name == "kgw"):
-            prev = rebuilt_ids if rebuilt_ids else token_ids[:i]
+            src = rebuilt_ids if rebuilt_ids else token_ids[:i]
+            prev = src[-window:]
             is_green = analyzer.scheme.score_token(tid, prev, vsize)
 
         replacement_text = None
         if is_green and len(replacements) < max_replacements:
+            src = rebuilt_ids if rebuilt_ids else token_ids[:i]
             replacement_text = _pick_red_replacement(
                 token_text=tstr,
-                prev_ids=rebuilt_ids if rebuilt_ids else token_ids[:i],
+                prev_ids=src[-window:],
                 analyzer=analyzer,
                 tokenizer=tok,
                 vocab_size=vsize,
@@ -174,8 +177,6 @@ def neutralize_targeted(
         pieces.append(text[cursor:])
 
     cleaned = "".join(pieces)
-    # Normalize whitespace runs introduced by awkward token edges
-    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
 
     after = analyzer.analyze(cleaned)
     return TargetedResult(
@@ -203,14 +204,12 @@ def _pick_red_replacement(
     vocab_size: int,
 ) -> str | None:
     word = token_text
-    # GPT-2 often has leading space Ġ
+    # GPT-2 often has a leading space (decoded) or Ġ marker
     leading_space = word.startswith(" ") or word.startswith("\u0120") or word.startswith("Ġ")
-    # transformers decode usually gives real space
     core = word.lstrip(" \t\n\rĠ")
     if not core or not re.search(r"[A-Za-z]", core):
         return None
 
-    # Preserve simple casing
     def _case_like(src: str, template: str) -> str:
         if template.isupper():
             return src.upper()
@@ -220,36 +219,22 @@ def _pick_red_replacement(
             return src.lower()
         return src
 
-    lower = core.lower()
-    candidates = list(_SYNONYMS.get(lower, []))
-    # Mild morphological hacks
-    if lower.endswith("ing") and lower[:-3] in _SYNONYMS:
-        candidates.extend(s + "ing" for s in _SYNONYMS[lower[:-3]])
-    if lower.endswith("ed") and lower[:-2] in _SYNONYMS:
-        candidates.extend(s + "ed" for s in _SYNONYMS[lower[:-2]])
-
-    green = analyzer.scheme.get_green_list(prev_ids, vocab_size)
+    candidates = list(_SYNONYMS.get(core.lower(), []))
 
     for cand in candidates:
         shaped = _case_like(cand, core)
-        # Prefer space-prefixed form if original had leading space
-        trial = (" " + shaped) if (word.startswith(" ") or leading_space) else shaped
-        # Also try without forcing space
-        for form in (trial, shaped, " " + shaped):
-            ids = tokenizer.encode(form, add_special_tokens=False)
-            if not ids:
-                continue
-            # Accept if first token is red (not green)
-            if ids[0] not in green:
-                # Prefer single-token replacements
-                if len(ids) == 1:
-                    return form if form.startswith(" ") or not word.startswith(" ") else form
-                # multi-token ok if all red-ish
-                if all(
-                    not analyzer.scheme.score_token(
-                        mid, prev_ids + list(ids[:j]), vocab_size
-                    )
-                    for j, mid in enumerate(ids)
-                ):
-                    return form
+        # Keep the original token's leading space so words are not glued together.
+        form = (" " + shaped) if leading_space else shaped
+        ids = tokenizer.encode(form, add_special_tokens=False)
+        if not ids:
+            continue
+        if analyzer.scheme.score_token(ids[0], prev_ids, vocab_size):
+            continue
+        if len(ids) == 1:
+            return form
+        if all(
+            not analyzer.scheme.score_token(mid, prev_ids + list(ids[:j]), vocab_size)
+            for j, mid in enumerate(ids)
+        ):
+            return form
     return None

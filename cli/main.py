@@ -35,11 +35,11 @@ def _read_text(args: argparse.Namespace) -> str:
 
 def _analyzer_kwargs(args: argparse.Namespace) -> dict:
     return dict(
-        scheme=getattr(args, "scheme", "kgw"),
-        gamma=getattr(args, "gamma", 0.25),
+        scheme=getattr(args, "scheme", None),
+        gamma=getattr(args, "gamma", None),
         key=getattr(args, "key", None),
-        tokenizer_name=getattr(args, "tokenizer", "gpt2"),
-        threshold=getattr(args, "threshold", 4.0),
+        tokenizer_name=getattr(args, "tokenizer", None),
+        threshold=getattr(args, "threshold", None),
         preset=getattr(args, "preset", None),
     )
 
@@ -122,13 +122,11 @@ def cmd_text_batch(args: argparse.Namespace) -> int:
 
 def cmd_text_neutralize(args: argparse.Namespace) -> int:
     from watermark_core.neutralize import NeutralizeConfig, neutralize_sync
-    from watermark_core.settings import load_settings
 
     text = _read_text(args)
     if not text:
         print("No text provided.", file=sys.stderr)
         return 1
-    s = load_settings()
     config = NeutralizeConfig.from_env(style=args.style)
     if args.api_key:
         config.api_key = args.api_key
@@ -183,6 +181,10 @@ def cmd_text_adaptive(args: argparse.Namespace) -> int:
     config = NeutralizeConfig.from_env(style=args.style)
     if args.api_key:
         config.api_key = args.api_key
+    if getattr(args, "base_url", None):
+        config.base_url = args.base_url
+    if getattr(args, "model", None):
+        config.model = args.model
     result = neutralize_adaptive(
         text,
         analyzer=analyzer,
@@ -201,7 +203,7 @@ def cmd_text_adaptive(args: argparse.Namespace) -> int:
             print(f"Wrote {args.output}")
         else:
             print(result.cleaned)
-    return 0 if result.success or result.cleaned else 1
+    return 0 if result.success else 1
 
 
 def cmd_image_exif(args: argparse.Namespace) -> int:
@@ -277,11 +279,11 @@ def cmd_settings_set(args: argparse.Namespace) -> int:
 
 
 def _add_wm_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--scheme", default="kgw")
-    p.add_argument("--gamma", type=float, default=0.25)
+    p.add_argument("--scheme", default=None)
+    p.add_argument("--gamma", type=float, default=None)
     p.add_argument("--key", default=None)
-    p.add_argument("--tokenizer", default="gpt2")
-    p.add_argument("--threshold", type=float, default=4.0)
+    p.add_argument("--tokenizer", default=None)
+    p.add_argument("--threshold", type=float, default=None)
     p.add_argument("--preset", default=None)
 
 
@@ -344,6 +346,8 @@ def build_parser() -> argparse.ArgumentParser:
     adp.add_argument("--max-rounds", type=int, default=3)
     adp.add_argument("--target-z", type=float, default=4.0)
     adp.add_argument("--api-key", default=None)
+    adp.add_argument("--base-url", default=None)
+    adp.add_argument("--model", default=None)
     _add_wm_args(adp)
     adp.add_argument("--json", action="store_true")
     adp.set_defaults(func=cmd_text_adaptive)

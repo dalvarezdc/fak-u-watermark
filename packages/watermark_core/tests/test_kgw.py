@@ -16,7 +16,37 @@ from watermark_core.schemes.kgw import KGWScheme
 from watermark_core.schemes.unigram import UnigramScheme
 
 
+def _legacy_green_ids(seed: int, vocab_size: int, k: int) -> set[int]:
+    """Original list(range(V)) Fisher-Yates — must match the implicit sampler."""
+    from watermark_core.schemes.kgw import _Xorshift64
+
+    rng = _Xorshift64(seed)
+    indices = list(range(vocab_size))
+    green: set[int] = set()
+    for i in range(k):
+        j = i + rng.randint(vocab_size - i)
+        indices[i], indices[j] = indices[j], indices[i]
+        green.add(indices[i])
+    return green
+
+
 class TestKGWGreenList:
+    def test_implicit_sample_matches_legacy(self):
+        from watermark_core.schemes.kgw import _Xorshift64, sample_green_ids
+
+        for seed, v, k in ((1, 200, 50), (99, 1000, 250), (15485863, 500, 125)):
+            legacy = _legacy_green_ids(seed, v, k)
+            sampled = set(sample_green_ids(_Xorshift64(seed), v, k))
+            assert sampled == legacy
+            assert len(sampled) == k
+
+    def test_score_token_matches_set(self):
+        scheme = KGWScheme(gamma=0.25, hash_key=42, window=1)
+        prev = [17]
+        green = scheme.get_green_list(prev, vocab_size=400)
+        for tid in range(400):
+            assert scheme.score_token(tid, prev, 400) is (tid in green)
+
     def test_deterministic(self):
         scheme = KGWScheme(gamma=0.25, hash_key=42, window=1)
         g1 = scheme.get_green_list([100], vocab_size=1000)

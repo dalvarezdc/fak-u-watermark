@@ -33,12 +33,12 @@ def analyze_batch_texts(
     items: Iterable[tuple[str, str]],
     *,
     analyzer: WatermarkAnalyzer | None = None,
-    scheme: str = "kgw",
-    gamma: float = 0.25,
+    scheme: str | None = None,
+    gamma: float | None = None,
     key: str | int | None = None,
-    tokenizer_name: str = "gpt2",
+    tokenizer_name: str | None = None,
     preset: str | None = None,
-    threshold: float = 4.0,
+    threshold: float | None = None,
 ) -> list[BatchItemResult]:
     """items: iterable of (name, text)."""
     if analyzer is None:

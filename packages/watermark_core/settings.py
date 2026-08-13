@@ -7,6 +7,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 
 def settings_path() -> Path:
@@ -60,7 +61,7 @@ PROVIDER_PRESETS: dict[str, dict[str, str]] = {
     },
     "deepseek": {
         "base_url": "https://api.deepseek.com",
-        "model": "deepseek-chat",
+        "model": "deepseek-v4-flash",
         "inpaint_model": "",
         "label": "DeepSeek",
     },
@@ -77,6 +78,29 @@ PROVIDER_PRESETS: dict[str, dict[str, str]] = {
         "label": "Custom (OpenAI-compatible)",
     },
 }
+
+
+_DEEPSEEK_ALIASES = {
+    "deepseek-chat": "deepseek-v4-flash",
+    "deepseek-reasoner": "deepseek-v4-pro",
+}
+
+
+def _is_deepseek(provider: str | None, base_url: str | None) -> bool:
+    host = urlparse(base_url or "").netloc.lower()
+    return (provider or "").strip().lower() == "deepseek" or "deepseek" in host
+
+
+def resolve_chat_model(provider: str | None, base_url: str | None, model: str | None) -> str:
+    """Map leftover / deprecated chat model names onto the current provider."""
+    model = (model or "").strip()
+    if _is_deepseek(provider, base_url):
+        if model in _DEEPSEEK_ALIASES:
+            return _DEEPSEEK_ALIASES[model]
+        if not model.startswith("deepseek"):
+            return PROVIDER_PRESETS["deepseek"]["model"]
+        return model
+    return model
 
 
 def load_settings() -> AppSettings:
@@ -116,10 +140,12 @@ def load_settings() -> AppSettings:
         env_model = os.environ.get("FAKU_MODEL") or os.environ.get("OPENAI_MODEL")
         if env_model:
             s.model = env_model
+    s.model = resolve_chat_model(s.provider, s.base_url, s.model)
     return s
 
 
 def save_settings(settings: AppSettings) -> Path:
+    settings.model = resolve_chat_model(settings.provider, settings.base_url, settings.model)
     path = settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -160,6 +186,7 @@ def apply_provider_preset(provider: str, *, keep_key: bool = True) -> AppSetting
     if preset.get("inpaint_model"):
         s.inpaint_model = preset["inpaint_model"]
     s.api_key = key
+    s.model = resolve_chat_model(s.provider, s.base_url, s.model)
     save_settings(s)
     return s
 

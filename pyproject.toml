@@ -59,6 +59,9 @@ packages = [
 "ui" = "ui"
 "cli" = "cli"
 
+[tool.setuptools.package-data]
+watermark_core = ["data/gpt2/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["packages/watermark_core/tests", "packages/image_tools/tests"]
 pythonpath = ["packages", "."]

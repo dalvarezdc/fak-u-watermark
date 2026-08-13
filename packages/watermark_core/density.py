@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import math
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -97,6 +98,7 @@ def density_to_html(
     if not points:
         return "<em>No tokens for heatmap.</em>"
 
+    points = compress_density_points(points)
     fracs = [p.window_green_fraction for p in points]
     fmin, fmax = min(fracs), max(fracs)
     span = (fmax - fmin) or 1.0
@@ -152,6 +154,34 @@ def density_to_html(
     if wrap:
         body = f'<div class="density-map">{body}</div>{legend}'
     return f"<style>{css}</style>\n{body}"
+
+
+def compress_density_points(
+    points: Sequence[DensityPoint],
+    *,
+    max_spans: int = 2000,
+) -> list[DensityPoint]:
+    """Merge adjacent tokens so huge docs don't emit tens of thousands of spans."""
+    n = len(points)
+    if n <= max_spans:
+        return list(points)
+    bin_size = max(2, math.ceil(n / max_spans))
+    merged: list[DensityPoint] = []
+    for i in range(0, n, bin_size):
+        group = points[i : i + bin_size]
+        merged.append(
+            DensityPoint(
+                index=group[0].index,
+                start=group[0].start,
+                end=group[-1].end,
+                text="".join(p.text for p in group),
+                is_signal=any(p.is_signal for p in group),
+                window_green_fraction=sum(p.window_green_fraction for p in group)
+                / len(group),
+                window_z=max(p.window_z for p in group),
+            )
+        )
+    return merged
 
 
 def density_summary(points: Sequence[DensityPoint]) -> dict:

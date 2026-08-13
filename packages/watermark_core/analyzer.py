@@ -9,6 +9,49 @@ from .schemes import PRESETS, Statistics, TokenInfo, create_scheme
 from .tokenizer import encode_with_offsets, vocab_size
 
 
+def resolve_analyzer_config(
+    *,
+    scheme: str | None = None,
+    gamma: float | None = None,
+    key: str | int | None = None,
+    tokenizer_name: str | None = None,
+    window: int | None = None,
+    threshold: float | None = None,
+    preset: str | None = None,
+) -> dict[str, Any]:
+    """Preset fills defaults; any explicit field wins (so a custom key is not ignored)."""
+    cfg: dict[str, Any] = {
+        "scheme": "kgw",
+        "gamma": 0.25,
+        "key": None,
+        "tokenizer_name": "gpt2",
+        "window": 1,
+        "threshold": 4.0,
+    }
+    if preset and preset != "(none)":
+        if preset not in PRESETS:
+            raise ValueError(f"Unknown preset '{preset}'. Available: {list(PRESETS)}")
+        p = PRESETS[preset]
+        cfg["scheme"] = p.get("scheme", cfg["scheme"])
+        cfg["gamma"] = float(p.get("gamma", cfg["gamma"]))
+        cfg["key"] = p.get("hash_key", cfg["key"])
+        if "window" in p:
+            cfg["window"] = int(p["window"])
+    if scheme is not None and str(scheme).strip():
+        cfg["scheme"] = scheme
+    if gamma is not None:
+        cfg["gamma"] = float(gamma)
+    if key is not None and not (isinstance(key, str) and not str(key).strip()):
+        cfg["key"] = key
+    if tokenizer_name is not None and str(tokenizer_name).strip():
+        cfg["tokenizer_name"] = tokenizer_name
+    if window is not None:
+        cfg["window"] = int(window)
+    if threshold is not None:
+        cfg["threshold"] = float(threshold)
+    return cfg
+
+
 @dataclass
 class AnalysisResult:
     """Full analysis output for a piece of text."""
@@ -44,34 +87,34 @@ class WatermarkAnalyzer:
 
     def __init__(
         self,
-        scheme: str = "kgw",
-        gamma: float = 0.25,
+        scheme: str | None = None,
+        gamma: float | None = None,
         key: str | int | None = None,
-        tokenizer_name: str = "gpt2",
-        window: int = 1,
-        threshold: float = 4.0,
+        tokenizer_name: str | None = None,
+        window: int | None = None,
+        threshold: float | None = None,
         preset: str | None = None,
     ):
-        if preset:
-            if preset not in PRESETS:
-                raise ValueError(f"Unknown preset '{preset}'. Available: {list(PRESETS)}")
-            p = PRESETS[preset]
-            scheme = p.get("scheme", scheme)
-            gamma = float(p.get("gamma", gamma))
-            key = p.get("hash_key", key)
-            window = int(p.get("window", window))
-
-        self.scheme_name = scheme
-        self.gamma = gamma
-        self.hash_key = _parse_key(key)
-        self.tokenizer_name = tokenizer_name
-        self.window = window
-        self.threshold = threshold
-        self.scheme = create_scheme(
-            scheme,
+        cfg = resolve_analyzer_config(
+            scheme=scheme,
             gamma=gamma,
-            hash_key=self.hash_key,
+            key=key,
+            tokenizer_name=tokenizer_name,
             window=window,
+            threshold=threshold,
+            preset=preset,
+        )
+        self.scheme_name = cfg["scheme"]
+        self.gamma = cfg["gamma"]
+        self.hash_key = _parse_key(cfg["key"])
+        self.tokenizer_name = cfg["tokenizer_name"]
+        self.window = cfg["window"]
+        self.threshold = cfg["threshold"]
+        self.scheme = create_scheme(
+            self.scheme_name,
+            gamma=self.gamma,
+            hash_key=self.hash_key,
+            window=self.window,
         )
 
     def analyze(self, text: str) -> AnalysisResult:
@@ -126,6 +169,7 @@ class WatermarkAnalyzer:
         vsize = vocab_size(self.tokenizer_name)
         tokens: list[TokenInfo] = []
         green_flags: list[bool] = []
+        window = max(1, int(self.window))
 
         for i, (tid, tstr, (start, end)) in enumerate(
             zip(token_ids, token_strings, offsets)
@@ -136,7 +180,8 @@ class WatermarkAnalyzer:
                 is_signal = False
                 scored = False
             else:
-                prev = token_ids[:i]
+                # Only the last `window` tokens affect the seed — avoid O(n²) copies.
+                prev = token_ids[max(0, i - window) : i]
                 is_signal = self.scheme.score_token(tid, prev, vsize)
                 scored = True
 
